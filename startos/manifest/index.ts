@@ -31,11 +31,9 @@ export const manifest = setupManifest({
       description:
         'TailWatcher publishes its takeoff and landing alerts to a topic on this NTFY server, which pushes them to the NTFY app on your phone.',
       optional: false,
-      s9pk: null,
-      metadata: {
-        title: 'NTFY',
-        icon: '../assets/ntfy.svg',
-      },
+      // start-cli copies NTFY's title and icon from its official package at
+      // pack time, so the Dependencies section shows them.
+      s9pk: 'https://github.com/Start9Labs/ntfy-startos/releases/download/v2.31.1_0/ntfy_x86_64.s9pk',
     },
   },
 })
