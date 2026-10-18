@@ -14,15 +14,14 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 
 ## Build
 
-- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.5.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
+- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.5.1`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
 - Packing needs a git commit (it records the hash) and the `assets/` dir.
 - `make install` sideloads to the host in `~/.startos/config.yaml`.
 
 ## Gotchas
 
 - `info` runs in the topic listener thread, outside CONFIG_LOCK; `apply_command` returns (None, False) for it. `on_info` lives inside `run()` in tailwatcher.py, so a missing module import only fails live; `test_lookup` checks the import.
-- Text commands need `pkg_tailwatcher` Read-Write on `tailwatcher*` (Provision Publisher only grants write); a 403 on the stream shows in health and retries every 60s.
-- NTFY on StartOS is deny-all. TailWatcher needs a publisher token from NTFY → Provision Publisher (topic `tailwatcher*` covers every watcher); SDK 1.5.2 can't call that action cross-package, so the user pastes it into Configure.
+- NTFY on StartOS is deny-all. TailWatcher uses a token for a **regular** NTFY user (`tailwatcher`) with Read-Write on `tailwatcher*`, minted in the NTFY web UI (Account → Access tokens; same as POST /v1/account/token). NTFY's Provision Publisher makes a `pkg_` account that is write-only, and Grant User Topic Access hides `pkg_` users, so a publisher token can send alerts but never read text commands. A 403 on the command stream shows in health and retries every 60s.
 - Publish failures: transient ones (network, 429, 5xx) go to a per-delivery retry queue in `state.json` `_retry` (30 min), so other watchers never get duplicates; 4xx refusals aren't retried and show in health.
 - Config format changed in 0.2.0 (top-level `aircraft`/`ntfyTopic` → `watchers`). `versions/current.ts` migrates on update, and `load_config` in Python also accepts the old format.
 - The Configure form nests a list (aircraft) inside a list item (watcher). The SDK types allow it; check it renders well in the StartOS UI before relying on deeper nesting.

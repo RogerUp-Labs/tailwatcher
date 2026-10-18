@@ -10,5 +10,5 @@ export const long = {
 
 export const installAlert = {
   en_US:
-    'TailWatcher sends alerts through NTFY on this server. Before configuring it, open NTFY → Actions → Provision Publisher, enter Publisher ID "tailwatcher" and Topic "tailwatcher*", and copy the token it returns. Then run TailWatcher → Configure, add a watcher with your tail numbers and paste the token.',
+    'TailWatcher sends alerts through NTFY on this server. Before configuring it, in NTFY run Create User "tailwatcher", then Grant User Topic Access for tailwatcher on topic "tailwatcher*" with Read-Write. Log in to the NTFY web UI as tailwatcher and create an access token under Account → Access tokens. Then run TailWatcher → Configure, paste the token and add a watcher with your tail numbers.',
 }

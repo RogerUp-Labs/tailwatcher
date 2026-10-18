@@ -70,7 +70,7 @@ const watcherSpec = InputSpec.of({
   topic: Value.text({
     name: 'NTFY Topic',
     description:
-      'Topic this watcher subscribes to in the NTFY app. Start it with "tailwatcher_" so one publisher token (topic tailwatcher*) covers every watcher. In NTFY, give this person\'s user Read Only access to it.',
+      'Topic this watcher subscribes to in the NTFY app. Start it with "tailwatcher_" so TailWatcher\'s NTFY user (granted tailwatcher*) covers every watcher. In NTFY, give this person\'s user Read Only access to it.',
     required: true,
     default: null,
     placeholder: 'tailwatcher_dad',
@@ -137,7 +137,7 @@ const inputSpec = InputSpec.of({
   ntfyToken: Value.text({
     name: 'NTFY Access Token',
     description:
-      'In NTFY, run Actions → Provision Publisher with Publisher ID "tailwatcher" and Topic "tailwatcher*", then paste the token (tk_…) here. The wildcard lets this one token publish to every watcher\'s topic.',
+      'An access token for a regular NTFY user with Read-Write on "tailwatcher*". In NTFY: Create User "tailwatcher", Grant User Topic Access (tailwatcher, tailwatcher*, Read-Write), then log in to the NTFY web UI as tailwatcher and create a token under Account → Access tokens. A Provision Publisher token also works for alerts, but cannot read, so text commands need the user token.',
     required: false,
     default: null,
     masked: true,
@@ -152,7 +152,7 @@ const inputSpec = InputSpec.of({
   textCommands: Value.toggle({
     name: 'Text Commands',
     description:
-      'Let each watcher change their own list by typing in their NTFY topic: send a tail or flight number to add it ("UA1234 for 2 days" to have it expire), "remove N12345" to drop it, "list" to see it. Requires granting pkg_tailwatcher Read-Write on tailwatcher* in NTFY, and each watcher\'s user Read-Write on their topic.',
+      'Let each watcher change their own list by typing in their NTFY topic: send a tail or flight number to add it ("UA1234 for 2 days" to have it expire), "remove N12345" to drop it, "list" to see it. Requires the NTFY Access Token above to belong to a user with Read-Write on tailwatcher*, and each watcher\'s user Read-Write on their topic.',
     default: true,
   }),
   timeZone: Value.select({

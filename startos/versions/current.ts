@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.5.0:0',
+  version: '0.5.1:0',
   releaseNotes: {
     en_US:
-      'Aircraft lookup: text "info N12345" (or "who N12345", "info UA1234") to your topic to see what the plane is, who owns it (FAA registry for US aircraft: owner, city and state, model, year, engine, registration status), where it is right now, any military or privacy flags, and a photo from planespotters.net. Uses hexdb.io for non-US aircraft. No settings change.',
+      'Corrected NTFY setup: NTFY does not let a Provision Publisher account be given read access, so text commands need a regular NTFY user instead. Create User "tailwatcher", grant it Read-Write on "tailwatcher*", create an access token for it in the NTFY web UI (Account → Access tokens), and paste that token into Configure. The install message, Configure help and health messages now say this.',
   },
   migrations: {
     up: async () => {},

@@ -4,14 +4,18 @@ TailWatcher sends a push notification, through NTFY on this server, when an airc
 
 ## Setup
 
-1. **Create a publisher in NTFY.** Open **NTFY → Actions → Provision Publisher**. Enter Publisher ID `tailwatcher` and Topic `tailwatcher*`. Copy the **token** (`tk_…`) it shows. The `*` lets this one token publish to every watcher's topic (`tailwatcher`, `tailwatcher_dad`, …).
+1. **Give TailWatcher its own NTFY user and token.**
+   1. **NTFY → Actions → Create User**, username `tailwatcher`. Copy the password it shows.
+   2. **NTFY → Actions → Grant User Topic Access**: user `tailwatcher`, topic **Enter New** `tailwatcher*`, permission **Read-Write**. The `*` covers every watcher's topic (`tailwatcher`, `tailwatcher_dad`, …), and Read-Write lets TailWatcher both send alerts and read text commands.
+   3. Open the **NTFY web UI** (a private browser window is easiest), log in as `tailwatcher`, go to **Account → Access tokens → Create access token**, set it to never expire, and copy the token (`tk_…`).
+
+   (NTFY's **Provision Publisher** action creates a send-only account that can't be given read access, so it works for alerts but not for text commands.)
 2. **Configure TailWatcher.** Open **TailWatcher → Actions → Configure**, paste the **token**, and add a watcher:
    - **Name**, e.g. `Sam`
    - **NTFY Topic**, e.g. `tailwatcher_sam`
    - **Aircraft:** each tail number (e.g. `N12345`) or flight number (e.g. `UA1234`, with **Type** set to Flight number), with an optional nickname and an optional **Stop Watching After** (days)
 3. **Subscribe on the phone.** In the NTFY Android app, add your server, log in, and subscribe to the watcher's topic.
-4. **Turn on text commands (optional, recommended).** In NTFY, run **Grant User Topic Access** for user `pkg_tailwatcher`, topic `tailwatcher*`, permission **Read-Write**, so TailWatcher can read what you send.
-5. Run **TailWatcher → Actions → Send Test Notification**. It sends to every watcher's topic and shows which ones worked.
+4. Run **TailWatcher → Actions → Send Test Notification**. It sends to every watcher's topic and shows which ones worked.
 
 ## Text commands
 

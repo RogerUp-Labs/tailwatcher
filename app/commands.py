@@ -369,7 +369,7 @@ class TopicListener(threading.Thread):
                 if e.code in (401, 403):
                     self.on_status(self.topic, (
                         f"text commands can't read topic {self.topic} (HTTP {e.code}); in NTFY, "
-                        "grant pkg_tailwatcher Read-Write on tailwatcher*"))
+                        "give the user whose token TailWatcher uses Read-Write on tailwatcher*"))
                     delay = 60
                 else:
                     log.warning("listening on %s: %s", self.topic, e)
