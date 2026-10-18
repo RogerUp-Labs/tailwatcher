@@ -59,6 +59,8 @@ const shape = z.object({
   timeZone: z
     .enum(Object.keys(timeZones) as [TimeZone, ...TimeZone[]])
     .catch('America/New_York'),
+  /** Optional RapidAPI key for AeroDataBox; lets "inbound UA1234" find the plane itself. */
+  aerodataboxKey: z.string().catch(''),
 })
 
 export type Config = z.infer<typeof shape>

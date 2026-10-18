@@ -4,7 +4,7 @@
 #   make install    # sideload the .s9pk to the host in ~/.startos/config.yaml
 #   make test       # run the watcher's unit tests
 
-IMAGE := start9/tailwatcher/main:0.5.1
+IMAGE := start9/tailwatcher/main:0.6.0
 ARCHES := x86 arm
 TARGETS := x86
 
@@ -16,7 +16,7 @@ image:
 	docker build --network=host -t $(IMAGE) .
 
 test:
-	cd app && python3 -m unittest -v test_tailwatcher test_commands test_flights test_lookup
+	cd app && python3 -m unittest -v test_tailwatcher test_commands test_flights test_lookup test_trips
 
 # The manifest points at the local $(IMAGE) tag, so build it before packing.
 $(BASE_NAME)_x86_64.s9pk: image

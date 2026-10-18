@@ -7,7 +7,7 @@ RUN wget -q -O airports-full.csv https://davidmegginson.github.io/ourairports-da
 FROM python:3.12-alpine
 WORKDIR /app
 COPY --from=airports /build/airports.csv /app/airports.csv
-COPY app/tailwatcher.py app/commands.py app/flights.py app/lookup.py /app/
+COPY app/tailwatcher.py app/commands.py app/flights.py app/lookup.py app/trips.py /app/
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 CMD ["python", "/app/tailwatcher.py"]

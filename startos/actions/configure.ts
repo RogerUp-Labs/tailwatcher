@@ -162,6 +162,15 @@ const inputSpec = InputSpec.of({
     default: 'America/New_York',
     values: timeZones,
   }),
+  aerodataboxKey: Value.text({
+    name: 'AeroDataBox API Key (optional)',
+    description:
+      'For "where\'s my plane?" trip tracking. Without a key, you tell TailWatcher which plane is flying in for your flight ("inbound UA1234 N38473 dep 4:30pm"). With one, "inbound UA1234" is enough: it looks up the assigned plane, the flight it arrives on and your departure time, and re-checks before departure in case the plane changes. Get a free key by subscribing to AeroDataBox\'s Basic plan on RapidAPI (rapidapi.com/aedbx-aedbx/api/aerodatabox). Each trip uses about 2 requests per check.',
+    required: false,
+    default: null,
+    masked: true,
+    placeholder: 'RapidAPI key',
+  }),
   mapLinks: Value.select({
     name: 'Map Buttons',
     description:
@@ -218,6 +227,7 @@ export const configure = sdk.Action.withInput(
     return {
       ...c,
       ntfyToken: c.ntfyToken || null,
+      aerodataboxKey: c.aerodataboxKey || null,
       watchers: c.watchers.map((w) => ({
         ...w,
         aircraft: w.aircraft.map((a) => ({
@@ -273,6 +283,7 @@ export const configure = sdk.Action.withInput(
       mapLinks: input.mapLinks,
       textCommands: input.textCommands,
       timeZone: input.timeZone,
+      aerodataboxKey: input.aerodataboxKey?.trim() ?? '',
     })
     return null
   },

@@ -27,13 +27,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import commands
 import flights
 import lookup
+import trips
 from commands import entry_key, normalize_tail
 
 CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-USER_AGENT = "TailWatcher/0.5 (+https://github.com/homebrew-gh/tailwatcher)"
+USER_AGENT = "TailWatcher/0.6 (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
     "adsb.lol": {"tail": "https://api.adsb.lol/v2/reg/{key}",
@@ -118,6 +119,8 @@ def load_config(path=CONFIG_PATH, now=None):
         "map_links": raw.get("mapLinks") or "adsbx",
         "data_source": raw.get("dataSource") or "adsb.lol",
         "text_commands": bool(raw.get("textCommands", True)),
+        "time_zone": raw.get("timeZone") or commands.DEFAULT_TZ,
+        "adb_key": (raw.get("aerodataboxKey") or "").strip(),
     }
 
 
@@ -142,12 +145,16 @@ class Airports:
 
     def __init__(self, path=AIRPORTS_PATH):
         self.rows = []
+        self.coords = {}  # ident -> (lat, lon, name)
+        self.iata = {}    # "IAD" -> "KIAD"
         try:
             with open(path, newline="") as f:
                 for r in csv.DictReader(f):
-                    self.rows.append(
-                        (r["ident"], r["name"], float(r["lat"]), float(r["lon"]))
-                    )
+                    lat, lon = float(r["lat"]), float(r["lon"])
+                    self.rows.append((r["ident"], r["name"], lat, lon))
+                    self.coords[r["ident"]] = (lat, lon, r["name"])
+                    if r.get("iata"):
+                        self.iata.setdefault(r["iata"], r["ident"])
         except (OSError, KeyError, ValueError) as e:
             log.warning("airport database unavailable (%s)", e)
 
@@ -400,8 +407,46 @@ def run():
             reply["message"] = reply["message"].replace(f"Send {tail} to watch it.", f"Send {shown} to watch this flight.")
         return reply
 
+    def on_inbound(topic, text):
+        """Answer "inbound UA1234 [N38473] [dep 4:30pm]" by starting a trip."""
+        now = time.time()
+        trip = trips.parse_inbound(text, now, cfg["time_zone"], airports)
+        if isinstance(trip, str):
+            return trip
+        trip["topic"] = topic
+        if not trip["inbound"]:
+            if not cfg["adb_key"]:
+                return (trips.USAGE + "\n\nOr add a free AeroDataBox key in Configure and I'll look "
+                        "the plane up myself.")
+            try:
+                trips.resolve(trip, cfg["adb_key"], USER_AGENT)
+            except trips.AdbError as e:
+                return f"❌ {e}.\n\n{trips.USAGE}"
+            trip["last_check"] = now
+            trips.due_for_check(trip, now)  # checkpoints already behind us don't count
+            if not trip.get("dep_time") and not trip["inbound"]:
+                trips.add(trip)
+                return (f"🤷 AeroDataBox has nothing for {trip['flight']} on {trip['date']} yet. "
+                        "I'll check again later; you can also add the plane yourself:\n" + trips.USAGE)
+        trips.add(trip)
+        wake.set()  # poll the plane right away
+        return trips.describe(trip, cfg["time_zone"])
+
     def on_command(topic, text):
         verb, ident, _, _ = commands.parse(text)
+        if verb in ("inbound", "trips", "cancel"):
+            if not any(w["topic"] == topic for w in cfg["watchers"]):
+                return
+            if verb == "inbound":
+                reply = on_inbound(topic, ident)
+            elif verb == "trips":
+                reply = trips.describe_all(trips.for_topic(topic), cfg["time_zone"])
+            else:
+                n = trips.cancel(topic, ident)
+                reply = f"🗑 Stopped tracking {ident}." if n else f"🤷 No trip for {ident}."
+            log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0])
+            send({"topic": topic, "message": reply, "tags": ["robot"], "priority": 2})
+            return
         if verb == "info":
             if not any(w["topic"] == topic for w in cfg["watchers"]):
                 return
@@ -410,6 +455,13 @@ def run():
             send({"topic": topic, "tags": ["robot"], "priority": 2, **reply})
             return
         reply, changed = commands.apply_command(CONFIG_PATH, topic, text, status=load_state())
+        if reply and verb == "remove" and trips.cancel(topic, ident):
+            reply = (f"🗑 Stopped tracking your {ident} trip." if "isn't on your list" in reply
+                     else reply + f"\nAlso stopped tracking your {ident} trip.")
+        if reply and verb == "list":
+            mine = trips.for_topic(topic)
+            if mine:
+                reply += "\n\n" + trips.describe_all(mine, cfg["time_zone"])
         log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0] if reply else "ignored")
         if reply:
             send({"topic": topic, "message": reply, "tags": ["robot"], "priority": 2})
@@ -444,6 +496,59 @@ def run():
         except (urllib.error.URLError, OSError) as e:
             err = e
         log.error("ntfy publish to %s failed: %s (will retry)", topic, err)
+        return False
+
+    def track_trips(fixes, errors):
+        """Re-check AeroDataBox where due, poll each trip's plane, send trip alerts.
+
+        Returns True if the ADS-B feed rate-limited us.
+        """
+        topics = {w["topic"] for w in cfg["watchers"]}
+        with trips.TRIPS_LOCK:
+            now = time.time()
+            all_trips = trips.load()
+            active = [t for t in all_trips if trips.expires_at(t) > now and t.get("topic") in topics]
+            changed = len(active) != len(all_trips)
+            outgoing = []
+            for t in active:
+                if cfg["adb_key"] and trips.due_for_check(t, now):
+                    changed = True
+                    try:
+                        notes = trips.resolve(t, cfg["adb_key"], USER_AGENT)
+                        t["last_check"] = now
+                        outgoing += [(t, *m) for m in trips.change_messages(t, notes, cfg["time_zone"])]
+                    except trips.AdbError as e:
+                        errors.append(str(e))
+            for kind, key in {trips.inbound_key(t) for t in active if not t.get("landed")} - {None}:
+                if key in fixes:
+                    continue
+                try:
+                    fixes[key] = fetch_aircraft(cfg["data_source"], key, kind)
+                except urllib.error.HTTPError as e:
+                    errors.append(f"{key}: {e}")
+                    if e.code == 429:
+                        return True
+                except (urllib.error.URLError, OSError, ValueError) as e:
+                    errors.append(f"{key}: {e}")
+                time.sleep(1.1)
+            for t in active:
+                k = trips.inbound_key(t)
+                if not k or k[1] not in fixes or t.get("landed"):
+                    continue
+                msgs = trips.step(t, fixes[k[1]], now, airports, cfg["time_zone"],
+                                  lambda trip, cs: trips.route_destination(trip, cs, USER_AGENT))
+                if msgs:
+                    changed = True
+                    outgoing += [(t, *m) for m in msgs]
+            if changed:
+                trips.save(active)
+        for t, title, message, priority in outgoing:
+            hexcode = (fixes.get((trips.inbound_key(t) or (None, None))[1]) or {}).get("hex")
+            payload = {"topic": t["topic"], "title": title, "message": message,
+                       "tags": ["airplane"], "priority": priority,
+                       "click": f"https://globe.adsbexchange.com/?icao={hexcode}" if hexcode else None}
+            if not send(payload):
+                retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
         return False
 
     backoff, error_streak = 0, 0
@@ -488,6 +593,7 @@ def run():
 
         started = time.time()
         errors, airborne, rate_limited = [], [], False
+        fixes = {}  # key -> this cycle's ADS-B record (None = not seen)
 
         still_pending = []
         for item in retry_queue:
@@ -512,6 +618,7 @@ def run():
             except (urllib.error.URLError, OSError, ValueError) as e:
                 errors.append(f"{shown}: {e}")
                 continue
+            fixes[key] = ac
             st, event = observe(state.get(key, {}), ac, time.time())
             if ac is not None:
                 st["last_fix"] = {k: ac.get(k) for k in ("lat", "lon", "alt_baro", "gs", "track", "t", "flight", "r")}
@@ -529,6 +636,8 @@ def run():
                         retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
             state[key] = st
             time.sleep(1.1)  # stay under the APIs' ~1 req/s limit
+        if not rate_limited:
+            rate_limited = track_trips(fixes, errors) or rate_limited
         save_state({**state, "_retry": retry_queue})
 
         backoff = min(max(backoff * 2, 60), 600) if rate_limited else 0

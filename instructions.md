@@ -32,6 +32,8 @@ Type in your topic in the NTFY app (the message bar at the bottom) and TailWatch
 | `list` | Show your list, what's airborne, and time left on expiring entries |
 | `info N12345` (or `who N12345`) | Look up any aircraft: what it is, who owns it, where it is now, and a photo |
 | `info UA1234` | The same for whichever plane is flying that flight right now |
+| `inbound UA1234 N38473 dep 4:30pm` | Follow the plane flying in for your flight (see **Where's my plane?** below) |
+| `trips` / `cancel UA1234` | Show your trips / stop tracking one |
 | `help` | Show the commands |
 
 A plane you add is checked right away; if it's already flying, you get the "airborne" alert within seconds. Sending an entry you already watch with a new expiry (`UA1234 for 3d`) updates it. When an entry expires, TailWatcher removes it and posts "⌛ Stopped watching UA1234 (expired)". "until" uses the **Time Zone** set in Configure. Changes show up in **Configure** too. Each person can only change their own list, since they can only post to their own topic. Turn this off with **Text Commands** in Configure.
@@ -62,6 +64,25 @@ with a photo when planespotters.net has one, and buttons for ADS-B Exchange, the
 - **Owner details** come from the FAA registry, so they're US aircraft (N-numbers) only. The reply shows city and state; the **FAA record** button has the full public record. Non-US aircraft show the operator from hexdb.io instead.
 - **Flags** show when an aircraft is military, on adsb.lol's "interesting" list, or hidden from FlightAware and Flightradar24 (FAA LADD).
 - Owners can be companies or trusts set up to keep their name private, and the FAA's privacy (PIA) program hides some aircraft altogether.
+
+## Where's my plane?
+
+Before a flight, the plane you'll fly on is usually still finishing its previous flight somewhere else. If that flight runs late, so will yours. TailWatcher can follow that plane and tell you:
+
+- ✈️ when it **takes off toward your airport**, with an arrival estimate and how much time that leaves before your departure
+- ⏳ / ⚠️ if its arrival gets **within 45 minutes**, then **20 minutes**, of your departure, and 🧳 if it's **running 15+ minutes later** than last announced
+- 🛬 when it **lands** at your airport (or that it's already there)
+- 🧳 if it's flying an **earlier flight** first, so you know where it is
+
+**Without an AeroDataBox key**, tell TailWatcher which plane it is. Your airline app usually shows it under "Where's my plane?", as a tail number or the flight it's arriving on:
+
+`inbound UA1234 N38473 dep 4:30pm` · `inbound UA1234 UA567 dep 4:30pm tomorrow from IAD`
+
+Your flight comes first, then the plane, your departure time, and optionally `tomorrow` or a date (`10/20`) and your airport (`from IAD`). Without `from`, TailWatcher works out your airport from where the plane is flying.
+
+**With an AeroDataBox key** (free; see Configure), `inbound UA1234` is enough (add `tomorrow` or a date for later trips). TailWatcher looks up the plane assigned to your flight, the flight it arrives on and your departure time, re-checks about 24 h, 6 h, 2 h and 45 min before departure, and tells you if the plane or your departure time changes. Each check uses about 2 of the free plan's monthly requests.
+
+Arrival estimates come from the plane's live position and speed, so treat them as a heads-up rather than the airline's official time. Times are shown in the time zone set in Configure. Trips clear themselves a few hours after departure.
 
 ## Adding another person
 

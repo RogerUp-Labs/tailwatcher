@@ -34,6 +34,7 @@ export const v0_2_0 = VersionInfo.of({
           : 'adsbx') as 'adsbx' | 'adsblol' | 'both',
         textCommands: true,
         timeZone: 'America/New_York',
+        aerodataboxKey: '',
       })
     },
     down: IMPOSSIBLE,

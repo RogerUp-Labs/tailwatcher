@@ -42,7 +42,10 @@ HELP = (
     "• UA1234 for 2 days / N12345 12h / UA1234 until fri — stop watching after that\n"
     "• remove N12345 — stop watching\n"
     "• list — what you're watching\n"
-    "• info N12345 — who owns it, what it is, where it is now"
+    "• info N12345 — who owns it, what it is, where it is now\n"
+    "• inbound UA1234 N38473 dep 4:30pm — follow the plane flying in for your flight\n"
+    "  (with an AeroDataBox key in Configure, just: inbound UA1234)\n"
+    "• trips — your trips · cancel UA1234 — stop tracking one"
 )
 
 WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -122,7 +125,7 @@ def merge_flight_words(words, i):
 def parse(text, now=None, tz=DEFAULT_TZ):
     """Parse a message into (verb, ident, label, expires).
 
-    verb is add/remove/list/help/info/unknown; ident is the tail or flight number
+    verb is add/remove/list/help/info/inbound/trips/cancel/unknown; ident is the tail or flight number
     as typed; expires is a Unix time or None.
     """
     now = time.time() if now is None else now
@@ -136,6 +139,12 @@ def parse(text, now=None, tz=DEFAULT_TZ):
         return "help", None, "", None
     if first in ("info", "lookup", "who", "whois", "what") and len(words) >= 2:
         return "info", merge_flight_words(words[1:], 0)[0], "", None
+    if first in ("inbound", "trip", "flying") and len(words) >= 2:
+        return "inbound", " ".join(words[1:]), "", None  # parsed by trips.parse_inbound
+    if first in ("trips", "inbound", "trip") and len(words) == 1:
+        return "trips", None, "", None
+    if first in ("cancel",) and len(words) >= 2:
+        return "cancel", merge_flight_words(words[1:], 0)[0], "", None
     if first in ("add", "watch", "+") and len(words) >= 2:
         verb, words = "add", merge_flight_words(words[1:], 0)
     elif first in ("remove", "rm", "delete", "del", "unwatch", "-") and len(words) >= 2:
@@ -260,8 +269,8 @@ def apply_command(path, topic, text, status=None, now=None):
             return format_list(watcher, status, now), False
         if verb == "help":
             return HELP, False
-        if verb == "info":
-            return None, False  # handled by the caller (network lookup, no config change)
+        if verb in ("info", "inbound", "trips", "cancel"):
+            return None, False  # handled by the caller (network lookups / trips.json)
         if verb == "unknown":
             return "🤔 I didn't understand that. Send \"help\" for commands.", False
 
