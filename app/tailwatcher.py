@@ -26,13 +26,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import commands
 import flights
+import lookup
 from commands import entry_key, normalize_tail
 
 CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-USER_AGENT = "TailWatcher/0.4 (+https://github.com/homebrew-gh/tailwatcher)"
+USER_AGENT = "TailWatcher/0.5 (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
     "adsb.lol": {"tail": "https://api.adsb.lol/v2/reg/{key}",
@@ -375,7 +376,39 @@ def run():
     # Set by a text command that changed the list, to poll right away.
     wake = threading.Event()
 
+    def on_info(topic, ident_in):
+        """Answer "info N12345" / "info UA1234" with a full aircraft lookup."""
+        entry = commands.classify(ident_in or "")
+        if not entry:
+            return {"message": f"❌ \"{ident_in}\" doesn't look like a tail or flight number."}
+        kind, shown, key = entry
+        tail = shown
+        if kind == "flight":
+            try:
+                ac = fetch_aircraft(cfg["data_source"], key, "flight")
+            except (urllib.error.URLError, OSError, ValueError):
+                ac = None
+            if not ac or not ac.get("r"):
+                return {"message": f"{shown} isn't transmitting right now, so I can't tell which plane is flying it."}
+            tail = normalize_tail(ac["r"])
+        found = lookup.gather(tail, USER_AGENT, lambda t: fetch_aircraft("adsb.fi", t))
+        reply = lookup.build_reply(tail, found, airports, commands.is_watching(CONFIG_PATH, topic, key))
+        if reply is None:
+            return {"message": f"🤷 Couldn't find {tail} in the FAA registry, hexdb.io or live ADS-B. Check the tail number."}
+        if kind == "flight":
+            reply["title"] = f"🔎 {shown} → {tail}"
+            reply["message"] = reply["message"].replace(f"Send {tail} to watch it.", f"Send {shown} to watch this flight.")
+        return reply
+
     def on_command(topic, text):
+        verb, ident, _, _ = commands.parse(text)
+        if verb == "info":
+            if not any(w["topic"] == topic for w in cfg["watchers"]):
+                return
+            reply = on_info(topic, ident)
+            log.info("command on %s: %r → %s", topic, text, reply.get("title") or reply["message"])
+            send({"topic": topic, "tags": ["robot"], "priority": 2, **reply})
+            return
         reply, changed = commands.apply_command(CONFIG_PATH, topic, text, status=load_state())
         log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0] if reply else "ignored")
         if reply:

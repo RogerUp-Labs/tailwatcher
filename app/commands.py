@@ -41,7 +41,8 @@ HELP = (
     "• add N12345 Vegas trip — add with a nickname\n"
     "• UA1234 for 2 days / N12345 12h / UA1234 until fri — stop watching after that\n"
     "• remove N12345 — stop watching\n"
-    "• list — what you're watching"
+    "• list — what you're watching\n"
+    "• info N12345 — who owns it, what it is, where it is now"
 )
 
 WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -121,7 +122,7 @@ def merge_flight_words(words, i):
 def parse(text, now=None, tz=DEFAULT_TZ):
     """Parse a message into (verb, ident, label, expires).
 
-    verb is add/remove/list/help/unknown; ident is the tail or flight number
+    verb is add/remove/list/help/info/unknown; ident is the tail or flight number
     as typed; expires is a Unix time or None.
     """
     now = time.time() if now is None else now
@@ -133,6 +134,8 @@ def parse(text, now=None, tz=DEFAULT_TZ):
         return "list", None, "", None
     if first in ("help", "commands"):
         return "help", None, "", None
+    if first in ("info", "lookup", "who", "whois", "what") and len(words) >= 2:
+        return "info", merge_flight_words(words[1:], 0)[0], "", None
     if first in ("add", "watch", "+") and len(words) >= 2:
         verb, words = "add", merge_flight_words(words[1:], 0)
     elif first in ("remove", "rm", "delete", "del", "unwatch", "-") and len(words) >= 2:
@@ -257,6 +260,8 @@ def apply_command(path, topic, text, status=None, now=None):
             return format_list(watcher, status, now), False
         if verb == "help":
             return HELP, False
+        if verb == "info":
+            return None, False  # handled by the caller (network lookup, no config change)
         if verb == "unknown":
             return "🤔 I didn't understand that. Send \"help\" for commands.", False
 
@@ -297,6 +302,13 @@ def apply_command(path, topic, text, status=None, now=None):
         aircraft.remove(existing)
         write_raw(path, raw)
         return f"🗑 Removed {existing['tail']}. Watching {len(aircraft)} aircraft.", True
+
+
+def is_watching(path, topic, key):
+    """Is `key` (a tail or callsign poll key) on the list of the watcher on `topic`?"""
+    raw = read_raw(path)
+    watcher = next((w for w in raw.get("watchers") or [] if w.get("topic") == topic), None)
+    return bool(watcher) and any(entry_key(a) == key for a in watcher.get("aircraft") or [])
 
 
 def remove_expired(path, now=None):

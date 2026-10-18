@@ -26,6 +26,8 @@ Type in your topic in the NTFY app (the message bar at the bottom) and TailWatch
 | `add UA1234 Mom until fri` | Watch it through Friday night (until 3am Saturday). Also `until tomorrow` |
 | `remove N12345` | Stop watching |
 | `list` | Show your list, what's airborne, and time left on expiring entries |
+| `info N12345` (or `who N12345`) | Look up any aircraft: what it is, who owns it, where it is now, and a photo |
+| `info UA1234` | The same for whichever plane is flying that flight right now |
 | `help` | Show the commands |
 
 A plane you add is checked right away; if it's already flying, you get the "airborne" alert within seconds. Sending an entry you already watch with a new expiry (`UA1234 for 3d`) updates it. When an entry expires, TailWatcher removes it and posts "⌛ Stopped watching UA1234 (expired)". "until" uses the **Time Zone** set in Configure. Changes show up in **Configure** too. Each person can only change their own list, since they can only post to their own topic. Turn this off with **Text Commands** in Configure.
@@ -38,6 +40,24 @@ Airlines pick the aircraft for a flight on the day, so after booking a trip, wat
 - Some airlines (Ryanair, easyJet) broadcast callsigns that differ from the flight number, like `RYR5TM`. Use that callsign if the flight number doesn't alert.
 - A flight number is watched every day it flies, so give trips an expiry: `UA1234 for 2 days`.
 - How TailWatcher tells them apart: a registration with a dash (`G-ABCD`, `B-6123`) or a US N-number (`N12345`) is always a tail. A known airline code followed by 1–4 digits (`UA1234`), or any three letters followed by digits (`UAL1234`), is a flight. Anything else is a tail (`JA8089`).
+
+## Looking up a plane
+
+`info` works for any aircraft, watched or not. A reply looks like:
+
+> 🔎 N172SP
+> Cessna R172K (1977)
+> Owner: Luke Airlines LLC · Southgate, Michigan
+> Registration: valid, expires 08/31/2028
+> Engine: Continental IO-360 (piston)
+> Live: ✈️ 4,500 ft · 110 kt · 10 nm NW of KFDK
+> Send N172SP to watch it.
+
+with a photo when planespotters.net has one, and buttons for ADS-B Exchange, the FAA record and the photo page.
+
+- **Owner details** come from the FAA registry, so they're US aircraft (N-numbers) only. The reply shows city and state; the **FAA record** button has the full public record. Non-US aircraft show the operator from hexdb.io instead.
+- **Flags** show when an aircraft is military, on adsb.lol's "interesting" list, or hidden from FlightAware and Flightradar24 (FAA LADD).
+- Owners can be companies or trusts set up to keep their name private, and the FAA's privacy (PIA) program hides some aircraft altogether.
 
 ## Adding another person
 
