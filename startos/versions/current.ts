@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.8.2:0',
+  version: '0.9.0:0',
   releaseNotes: {
     en_US:
-      'A Board theme for the Web UI: an airport departures board where your trips and watched aircraft sit on split-flap tiles that flip when a status changes. Switch between Modern and Board in the top corner; each browser remembers its choice.',
+      'Edit from the Web UI: add, edit and remove watchers, their aircraft and flights (with nickname and stop-after days), and trips (flight, date, departure time, airport and the plane flying in). Trips added on the page get the same AeroDataBox lookup and alerts as the "inbound" text command, and every edit appears in the activity feed. Edits are only accepted from the TailWatcher page itself.',
   },
   migrations: {
     up: async () => {},

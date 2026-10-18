@@ -54,6 +54,7 @@ KEEP_UNDATED_H = 36     # ...or this long after it was added, with no departure 
 
 TIME_RE = re.compile(r"^(\d{1,2})(?::(\d{2}))?(am|pm|a|p)?$", re.I)
 DATE_RE = re.compile(r"^(\d{1,2})/(\d{1,2})$")
+ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")  # "2026-11-14", as the Web UI sends
 ADB_TIME_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?Z")
 
 USAGE = (
@@ -96,6 +97,14 @@ def scan(words, now, tz_name, airports):
         if low in ("today", "tomorrow"):
             out["day"] = today + datetime.timedelta(days=low == "tomorrow")
             out["explicit_day"], i = True, i + 1
+            continue
+        m = ISO_DATE_RE.match(w)
+        if m:
+            try:
+                out["day"], out["explicit_day"] = datetime.date(*map(int, m.groups())), True
+            except ValueError:
+                return f"❌ \"{w}\" isn't a date."
+            i += 1
             continue
         m = DATE_RE.match(w)
         if m:

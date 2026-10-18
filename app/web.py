@@ -5,6 +5,11 @@ only where StartOS exposes it. With "Require Web UI password" on in
 Configure, everything except /health (the StartOS health check) needs the
 password from /data/webui.json via HTTP Basic auth (any username); StartOS
 writes it at install and "Show Web UI Password" displays it.
+
+Edits are JSON POSTs to /api/... carrying an "X-TailWatcher: 1" header, and
+an Origin, if sent, must match the Host. Browsers won't let another website
+add that header without a CORS preflight (which this server never answers),
+so a page elsewhere can't make your browser change your lists.
 """
 
 import base64
@@ -40,8 +45,17 @@ def authorized(header, password):
     return hmac.compare_digest(given.encode(), password.encode())
 
 
+MAX_BODY = 64 * 1024
+
+
+def same_origin(origin, host):
+    if not origin:
+        return True  # same-origin GETs and non-browser clients often omit it
+    return urllib.parse.urlparse(origin).netloc == (host or "")
+
+
 def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
-                 require_password=lambda: False):
+                 require_password=lambda: False, post=None):
     class Handler(BaseHTTPRequestHandler):
         def reply(self, code, body, ctype="application/json", extra=None):
             if isinstance(body, (dict, list)):
@@ -59,18 +73,49 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
             self.end_headers()
             self.wfile.write(body)
 
+        def locked(self):
+            """Send the password challenge if one is needed and missing; True if sent."""
+            password = read_password(password_path) if require_password() else None
+            if require_password() and not password:
+                self.reply(503, "The Web UI password hasn't been set up yet. Restart TailWatcher.",
+                           "text/plain; charset=utf-8")
+                return True
+            if password and not authorized(self.headers.get("Authorization"), password):
+                self.reply(401, "Use the password from TailWatcher → Actions → Show Web UI Password.",
+                           "text/plain; charset=utf-8",
+                           {"WWW-Authenticate": 'Basic realm="TailWatcher", charset="UTF-8"'})
+                return True
+            return False
+
+        def do_POST(self):
+            path = urllib.parse.urlparse(self.path).path
+            if self.locked():
+                return
+            if (self.headers.get("X-TailWatcher") != "1"
+                    or not (self.headers.get("Content-Type") or "").startswith("application/json")
+                    or not same_origin(self.headers.get("Origin"), self.headers.get("Host"))):
+                return self.reply(403, {"ok": False, "message": "Edits must come from the TailWatcher page."})
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if not 0 < length <= MAX_BODY:
+                return self.reply(400, {"ok": False, "message": "Bad request."})
+            try:
+                data = json.loads(self.rfile.read(length))
+            except ValueError:
+                return self.reply(400, {"ok": False, "message": "Bad request."})
+            if post is None or not isinstance(data, dict):
+                return self.reply(404, {"ok": False, "message": "Not found."})
+            code, body = post(path, data)
+            return self.reply(code, body)
+
         def do_GET(self):
             path = urllib.parse.urlparse(self.path).path
             if path == "/health":
                 return self.reply(200, health.get())
-            password = read_password(password_path) if require_password() else None
-            if require_password() and not password:
-                return self.reply(503, "The Web UI password hasn't been set up yet. Restart TailWatcher.",
-                                  "text/plain; charset=utf-8")
-            if password and not authorized(self.headers.get("Authorization"), password):
-                return self.reply(401, "Use the password from TailWatcher → Actions → Show Web UI Password.",
-                                  "text/plain; charset=utf-8",
-                                  {"WWW-Authenticate": 'Basic realm="TailWatcher", charset="UTF-8"'})
+            if self.locked():
+                return
             if path == "/api/state":
                 return self.reply(200, snapshot())
             if path in FILES:
@@ -89,8 +134,8 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
 
 
 def serve(port, health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
-          require_password=lambda: False):
+          require_password=lambda: False, post=None):
     srv = ThreadingHTTPServer(("0.0.0.0", port),
-                              make_handler(health, snapshot, password_path, web_dir, require_password))
+                              make_handler(health, snapshot, password_path, web_dir, require_password, post))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

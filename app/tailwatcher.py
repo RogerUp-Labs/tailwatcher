@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 
 import commands
+import edits
 import flights
 import history
 import lookup
@@ -35,7 +36,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.8.2"
+VERSION = "0.9.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
@@ -600,11 +601,15 @@ def run():
         return False
 
     def snapshot():
-        """Everything the web UI shows. Read-only; secrets are left out."""
-        now, st = time.time(), load_state()
-        names = {w["topic"]: w["name"] for w in cfg["watchers"]}
+        """Everything the web UI shows. Read-only; secrets are left out.
+
+        Reads config.json fresh rather than using `cfg`, which only refreshes
+        at the top of a poll cycle: an edit made a second ago (or during a
+        rate-limit backoff) must show up right away."""
+        now, st, cur = time.time(), load_state(), load_config()
+        names = {w["topic"]: w["name"] for w in cur["watchers"]}
         watchers_out = []
-        for w in cfg["watchers"]:
+        for w in cur["watchers"]:
             aircraft = []
             for a in w["aircraft"]:
                 s_ = st.get(a["key"]) or {}
@@ -626,19 +631,84 @@ def run():
                     "departed", "landed", "eta_sent", "tight", "late", "missing", "replacement",
                     "last_check", "plane_locked")},
                     "topic": topic, "watcher": name, "number": n, "live": trips.is_live(t, now),
-                    "next_check": trips.next_check_time(t, now) if cfg["adb_key"] else None})
+                    "next_check": trips.next_check_time(t, now) if cur["adb_key"] else None})
         trips_out.sort(key=lambda t: t["dep_time"] or 0)
         return {
-            "now": now, "version": VERSION, "time_zone": cfg["time_zone"], "health": health.get(),
-            "settings": {"data_source": cfg["data_source"], "poll_seconds": cfg["poll_seconds"],
-                         "map_links": cfg["map_links"], "text_commands": cfg["text_commands"],
-                         "aerodatabox": bool(cfg["adb_key"]), "ntfy": bool(ntfy_url),
+            "now": now, "version": VERSION, "time_zone": cur["time_zone"], "health": health.get(),
+            "settings": {"data_source": cur["data_source"], "poll_seconds": cur["poll_seconds"],
+                         "map_links": cur["map_links"], "text_commands": cur["text_commands"],
+                         "aerodatabox": bool(cur["adb_key"]), "ntfy": bool(ntfy_url),
                          "listening": sorted(names[k] for k in names if k not in listen_errors)},
             "watchers": watchers_out, "trips": trips_out,
             "history": [dict(e, watcher=names.get(e["topic"], e["topic"])) for e in hist.recent(150)],
         }
 
-    web.serve(HEALTH_PORT, health, snapshot, require_password=web_password_required)
+    def trip_text(data, number=None):
+        """Turn the Web UI's trip form into the text the "inbound"/"change" commands read."""
+        parts = [str(number)] if number is not None else [str(data.get("flight") or "").strip()]
+        if number is not None and data.get("flight"):
+            parts.append(str(data["flight"]).strip())
+        if data.get("plane"):
+            parts += ["plane", str(data["plane"]).strip()]
+        if data.get("date"):
+            parts.append(str(data["date"]).strip())
+        if data.get("time"):
+            parts += ["dep", str(data["time"]).strip()]
+        if data.get("airport"):
+            parts += ["from", str(data["airport"]).strip()]
+        return " ".join(p for p in parts if p)
+
+    def handle_post(path, data):
+        """Edits from the Web UI. Returns (http_status, {"ok", "message"})."""
+        topic = str(data.get("topic") or "")
+        op = data.get("op")
+        names = {w["topic"]: w["name"] for w in load_config()["watchers"]}  # fresh: see snapshot()
+        try:
+            if path == "/api/watcher":
+                if op == "save":
+                    msg = edits.save_watcher(CONFIG_PATH, data.get("original") or None, data.get("name"),
+                                             data.get("topic"), data.get("priority") or "default",
+                                             bool(data.get("notifyLanding")))
+                elif op == "remove":
+                    msg = edits.remove_watcher(CONFIG_PATH, topic)
+                else:
+                    return 400, {"ok": False, "message": "Unknown action."}
+            elif path == "/api/aircraft":
+                if op == "save":
+                    msg = edits.save_aircraft(CONFIG_PATH, topic, data.get("ident"), data.get("label"),
+                                              data.get("expiresDays"), data.get("original"))
+                elif op == "remove":
+                    msg = edits.remove_aircraft(CONFIG_PATH, topic, str(data.get("ident") or ""))
+                else:
+                    return 400, {"ok": False, "message": "Unknown action."}
+            elif path == "/api/trip":
+                if topic not in names:
+                    return 404, {"ok": False, "message": "That watcher no longer exists."}
+                now = time.time()
+                if op == "add":
+                    msg = on_inbound(topic, trip_text(data))
+                elif op == "change":
+                    msg = trips.modify(topic, trip_text(data, int(data.get("number") or 0)),
+                                       on_change, now, cfg["time_zone"])
+                elif op == "cancel":
+                    msg = trips.modify(topic, str(int(data.get("number") or 0)), on_cancel, now, cfg["time_zone"])
+                else:
+                    return 400, {"ok": False, "message": "Unknown action."}
+            else:
+                return 404, {"ok": False, "message": "Not found."}
+        except edits.EditError as e:
+            return 400, {"ok": False, "message": str(e)}
+        except (TypeError, ValueError):
+            return 400, {"ok": False, "message": "Bad request."}
+        failed = (msg.startswith(("❌", "🤔", "🤷", "Which trip", "Tell me your flight", "You have "))
+                  and not msg.startswith("🤷 AeroDataBox has nothing"))  # that one still saves the trip
+        if not failed:
+            hist.add("in", topic or data.get("topic") or "", msg.splitlines()[0], kind="web", status="received")
+            wake.set()
+        log.info("web edit %s %s → %s", path, op, msg.splitlines()[0])
+        return (400 if failed else 200), {"ok": not failed, "message": msg}
+
+    web.serve(HEALTH_PORT, health, snapshot, require_password=web_password_required, post=handle_post)
 
     backoff, error_streak = 0, 0
     while True:
