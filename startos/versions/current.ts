@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.8.1:0',
+  version: '0.8.2:0',
   releaseNotes: {
     en_US:
-      'The Web UI no longer asks for a password by default: it is a household admin panel showing everyone\'s watchers and trips, reachable on your network and VPN. Turn on "Require Web UI Password" in Configure if you want one.',
+      'A Board theme for the Web UI: an airport departures board where your trips and watched aircraft sit on split-flap tiles that flip when a status changes. Switch between Modern and Board in the top corner; each browser remembers its choice.',
   },
   migrations: {
     up: async () => {},

@@ -26,7 +26,7 @@ Open **TailWatcher → Web UI** (on your LAN, over Tor, or a public address if y
 - **Activity:** recent alerts, replies and the text commands people sent, including any NTFY didn't accept
 - **System:** whether NTFY, text commands and trip lookups are working
 
-It shows everyone's watchers and trips in one place, like an admin panel, and opens without a login. If you'd like a password (for example, if TailWatcher gets a public address), turn on **Require Web UI Password** in **Configure**; then use any username and the password from **Actions → Show Web UI Password** (**Reset Web UI Password** makes a new one). The dashboard is read-only for now; make changes with text commands or **Configure**.
+It shows everyone's watchers and trips in one place, like an admin panel, and opens without a login. The switch in the top corner picks a look: **Modern**, or **Board**, an airport departures board where trips and aircraft sit on split-flap tiles that flip when something changes. Each browser remembers its choice. If you'd like a password (for example, if TailWatcher gets a public address), turn on **Require Web UI Password** in **Configure**; then use any username and the password from **Actions → Show Web UI Password** (**Reset Web UI Password** makes a new one). The dashboard is read-only for now; make changes with text commands or **Configure**.
 
 ## Text commands
 
