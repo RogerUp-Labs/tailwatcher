@@ -202,6 +202,17 @@ footer { color: var(--text-3); font-size: 12px; text-align: center; margin-top: 
   .t-who { margin-left: 0; width: 100%; }
 }
 
+/* ---------- shared trips ---------- */
+function followWhen(f) {
+  const when = f.dep_time ? `${fmtDay(f.dep_time)} ${fmtTime(f.dep_time)}` : fmtDate(f.date);
+  const state = f.landed ? " · landed" : f.departed ? " · in the air" : "";
+  return `${when}${f.dep_airport ? " from " + esc(apt(f.dep_airport)) : ""}${state}`;
+}
+function followingHtml(w) {
+  if (!w.following || !w.following.length) return "";
+  return `<div class="following">${w.following.map((f) => `<div>📣 Following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}</div>`;
+}
+
 /* ---------- editing ---------- */
 .btn { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
 .btn:hover { border-color: var(--text-3); }
@@ -226,6 +237,13 @@ dialog h3 { margin: 0 0 2px; font-size: 17px; }
 .field.check { grid-template-columns: auto 1fr; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
 .field.check input { width: 18px; height: 18px; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.checks { display: grid; gap: 6px; font-size: 13px; color: var(--text-2); }
+.checks .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.checks label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--text); font-size: 14px; cursor: pointer; }
+.checks input { width: 16px; height: 16px; margin: 0; }
+.checks small { color: var(--text-3); font-size: 12px; }
+.following { padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-2); display: grid; gap: 2px; }
+.following b { color: var(--text); font-family: var(--mono); }
 .form-error { color: var(--bad); font-size: 13px; white-space: pre-line; }
 .form-error:empty { display: none; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 4px; }
@@ -414,6 +432,7 @@ function renderWatchers(d) {
           <button type="button" class="linkbtn" data-act="edit-watcher" data-topic="${esc(w.topic)}">Edit</button>
         </div>
       </div>
+      ${followingHtml(w)}
       ${w.aircraft.length ? sorted(w.aircraft).map((a) => {
         const link = mapLink(a.hex);
         const meta = [
@@ -454,6 +473,7 @@ function renderTrips(d) {
     const rows = [];
     if (plane) rows.push(["Your plane", `${esc(inb.tail || "")}${inb.tail && inb.flight ? " · " : ""}${esc(inb.flight || "")}${inb.origin ? ` from ${esc(inb.origin)}` : ""}${inb.arr_time ? `, due ${fmtTime(inb.arr_time)}` : ""}`]);
     if (t.departed && !t.landed && t.eta_sent) rows.push(["Arriving", `around ${fmtTime(t.eta_sent)}${t.dep_time ? ` · ${Math.round((t.dep_time - t.eta_sent) / 60)} min before you leave` : ""}`]);
+    if (t.shared_names && t.shared_names.length) rows.push(["Shared with", esc(t.shared_names.join(", "))]);
     rows.push(["Source", t.source === "aerodatabox" ? (t.plane_locked ? "AeroDataBox (plane set by you)" : "AeroDataBox") : "Entered by text"]);
     if (t.next_check) rows.push(["Next check", `${until(t.next_check)}${t.last_check ? ` · last ${ago(t.last_check)}` : ""}`]);
     else if (t.last_check) rows.push(["Last checked", ago(t.last_check)]);
@@ -573,7 +593,7 @@ function renderTripsBoard(d) {
     if (t.missing && t.replacement) sub.push(`<span class="r">likely now ${esc(t.replacement.flight)}</span> · text <code>change ${t.number} ${esc(t.replacement.flight)}</code>`);
     else if (t.missing) sub.push(`text <code>change ${t.number} NEW123</code> with the new number`);
     if (t.next_check && !t.missing) sub.push(`next check ${until(t.next_check)}`);
-    sub.push(esc(t.watcher));
+    sub.push(esc(t.watcher) + (t.shared_names && t.shared_names.length ? ` → ${esc(t.shared_names.join(", "))}` : ""));
     sub.push(tripButtons(t).replace("</button><button", "</button> · <button"));
     return `<div class="flap-row cols-trip">
         ${flaps(k + ":f", t.flight, 7)}
@@ -617,10 +637,22 @@ function renderWatchersBoard(d) {
     }).join("");
     return `<div class="flap-group">${esc(w.name)} <small>${esc(w.topic)}</small>${w.priority !== "default" ? ` <span class="tag accent">${esc(w.priority)}</span>` : ""}
         <span style="margin-left:auto;display:flex;gap:12px"><button type="button" class="linkbtn" data-act="add-aircraft" data-topic="${esc(w.topic)}">+ aircraft</button><button type="button" class="linkbtn" data-act="edit-watcher" data-topic="${esc(w.topic)}">edit</button></span></div>
-      ${rows || `<div class="flap-sub">No aircraft yet. Text a tail number to <code>${esc(w.topic)}</code>.</div>`}`;
+      ${(w.following || []).map((f) => `<div class="flap-sub">📣 following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}
+      ${rows || (w.following && w.following.length ? "" : `<div class="flap-sub">No aircraft yet. Text a tail number to <code>${esc(w.topic)}</code>.</div>`)}`;
   }).join("");
   $("watchers").innerHTML = `<div class="card flap-board">
     <div class="flap-head cols-fleet"><span>Aircraft</span><span>Alt</span><span>Status</span></div>${groups}</div>`;
+}
+
+/* ---------- shared trips ---------- */
+function followWhen(f) {
+  const when = f.dep_time ? `${fmtDay(f.dep_time)} ${fmtTime(f.dep_time)}` : fmtDate(f.date);
+  const state = f.landed ? " · landed" : f.departed ? " · in the air" : "";
+  return `${when}${f.dep_airport ? " from " + esc(apt(f.dep_airport)) : ""}${state}`;
+}
+function followingHtml(w) {
+  if (!w.following || !w.following.length) return "";
+  return `<div class="following">${w.following.map((f) => `<div>📣 Following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}</div>`;
 }
 
 /* ---------- editing ---------- */
@@ -651,6 +683,8 @@ async function api(path, body) {
 
 const field = (f) => {
   const id = "f-" + f.name, v = f.value ?? "";
+  if (f.type === "checks") return f.options.length ? `<div class="checks" role="group" aria-label="${esc(f.label)}">${esc(f.label)}<div class="opts">${f.options.map(([val, lab]) =>
+    `<label><input type="checkbox" name="${f.name}" value="${esc(val)}" ${(v || []).includes(val) ? "checked" : ""}> ${esc(lab)}</label>`).join("")}</div>${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</div>` : "";
   if (f.type === "check") return `<label class="field check"><input type="checkbox" id="${id}" name="${f.name}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
   if (f.type === "select") return `<label class="field" for="${id}">${esc(f.label)}<select id="${id}" name="${f.name}">${f.options.map(([val, lab]) => `<option value="${esc(val)}" ${String(val) === String(v) ? "selected" : ""}>${esc(lab)}</option>`).join("")}</select>${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`;
   return `<label class="field" for="${id}">${esc(f.label)}<input id="${id}" name="${f.name}" type="${f.type || "text"}" value="${esc(v)}" ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ""} ${f.required ? "required" : ""} ${f.attrs || ""} autocomplete="off" autocapitalize="${f.caps === false ? "off" : "characters"}" spellcheck="false">${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`;
@@ -677,7 +711,11 @@ function openForm(spec) {
     const missing = [...form.querySelectorAll("[required]")].find((el) => !el.value.trim());
     if (missing) { $("dlg-err").textContent = "Fill in " + missing.closest("label").firstChild.textContent.trim() + "."; missing.focus(); return; }
     const values = {};
-    for (const el of form.elements) if (el.name) values[el.name] = el.type === "checkbox" ? el.checked : el.value.trim();
+    for (const el of form.elements) {
+      if (!el.name) continue;
+      if (el.type === "checkbox" && el.value !== "on") { (values[el.name] ||= []).push(...(el.checked ? [el.value] : [])); continue; }
+      values[el.name] = el.type === "checkbox" ? el.checked : el.value.trim();
+    }
     form.querySelector("[type=submit]").disabled = true;
     await done(await spec.save(values));
     form.querySelector("[type=submit]").disabled = false;
@@ -705,15 +743,20 @@ function tripForm(t) {
      {name: "airport", label: "From airport", value: t ? apt(t.dep_airport) : "", placeholder: "IAD", hint: "Optional"}],
     {name: "plane", label: "Plane flying in", value: inb.tail || inb.flight || "", placeholder: "N38473 or UA567",
      hint: adb ? "Leave blank and AeroDataBox finds it." : "From your airline app's \"Where's my plane?\" screen."},
+    {name: "share", label: "Share with", type: "checks", value: t ? t.shared_with : [],
+     options: LAST.watchers.filter((w) => !t || w.topic !== t.topic).map((w) => [w.topic, w.name]),
+     hint: "They get your flight's departure and landing, nothing else."},
   ];
   if (!t) return openForm({title: "Add trip", fields, saveLabel: "Add trip",
-    save: (v) => api("api/trip", {op: "add", ...v})});
+    save: (v) => api("api/trip", {op: "add", ...v, share: (v.share || []).filter((x) => x !== v.topic)})});
   const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time) : "", airport: apt(t.dep_airport), plane: inb.tail || inb.flight || ""};
   openForm({title: `Edit ${t.flight} · ${t.watcher}`, fields,
     save: (v) => {
-      const changes = Object.fromEntries(Object.entries(v).filter(([k, val]) => val && val !== before[k]));
-      if (!Object.keys(changes).length) return Promise.resolve({ok: true, message: "Nothing changed."});
-      return api("api/trip", {op: "change", topic: t.topic, number: t.number, ...changes});
+      const {share = [], ...rest} = v;
+      const changes = Object.fromEntries(Object.entries(rest).filter(([k, val]) => val && val !== before[k]));
+      const shareChanged = share.slice().sort().join() !== (t.shared_with || []).slice().sort().join();
+      if (!Object.keys(changes).length && !shareChanged) return Promise.resolve({ok: true, message: "Nothing changed."});
+      return api("api/trip", {op: "change", topic: t.topic, number: t.number, ...changes, ...(shareChanged ? {share} : {})});
     },
     remove: {label: "Cancel trip", confirm: `Stop tracking ${t.flight}?`, run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number})}});
 }

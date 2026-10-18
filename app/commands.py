@@ -47,7 +47,8 @@ HELP = (
     "  (with an AeroDataBox key in Configure, just: inbound UA1234)\n"
     "• trips — your trips, numbered\n"
     "• change 1 AA5678 / change 1 dep 5:10pm / change 1 N38473 / change 1 11/15 — update trip 1\n"
-    "• cancel 1 — stop tracking trip 1"
+    "• cancel 1 — stop tracking trip 1\n"
+    "• share 1 Mom & Dad — send them your flight's departure and landing (unshare 1 Mom & Dad to stop)"
 )
 
 WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -127,7 +128,7 @@ def merge_flight_words(words, i):
 def parse(text, now=None, tz=DEFAULT_TZ):
     """Parse a message into (verb, ident, label, expires).
 
-    verb is add/remove/list/help/info/inbound/trips/cancel/change/unknown; ident is the tail or flight number
+    verb is add/remove/list/help/info/inbound/trips/cancel/change/share/unshare/unknown; ident is the tail or flight number
     as typed; expires is a Unix time or None.
     """
     now = time.time() if now is None else now
@@ -147,6 +148,8 @@ def parse(text, now=None, tz=DEFAULT_TZ):
         return "trips", None, "", None
     if first in ("cancel",) and len(words) >= 2:
         return "cancel", " ".join(words[1:]), "", None  # "2", "AA1234" or "AA1234 11/14"
+    if first in ("share", "unshare") and len(words) >= 3:
+        return first, " ".join(words[1:]), "", None  # "share 1 Mom & Dad"
     if first in ("change", "update", "edit") and len(words) >= 3:
         return "change", " ".join(words[1:]), "", None  # parsed by trips.select/apply_change
     if first in ("add", "watch", "+") and len(words) >= 2:
@@ -273,7 +276,7 @@ def apply_command(path, topic, text, status=None, now=None):
             return format_list(watcher, status, now), False
         if verb == "help":
             return HELP, False
-        if verb in ("info", "inbound", "trips", "cancel", "change"):
+        if verb in ("info", "inbound", "trips", "cancel", "change", "share", "unshare"):
             return None, False  # handled by the caller (network lookups / trips.json)
         if verb == "unknown":
             return "🤔 I didn't understand that. Send \"help\" for commands.", False

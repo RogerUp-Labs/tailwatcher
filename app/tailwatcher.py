@@ -36,7 +36,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
@@ -463,10 +463,52 @@ def run():
     def on_cancel(trip, rest):
         return f"🗑 Stopped tracking {trip['flight']} on {trips.fmt_day(trip, cfg['time_zone'])}.", False
 
+    def announce_share(trip, added):
+        """Tell newly added people a trip was shared with them."""
+        names = {w["topic"]: w for w in load_config()["watchers"]}
+        owner = names.get(trip["topic"], {}).get("name") or trip["topic"]
+        title, message, priority = trips.share_announcement(trip, owner, cfg["time_zone"])
+        for topic in added:
+            if topic in names:
+                send({"topic": topic, "title": title, "message": message, "tags": ["robot"], "priority": priority})
+
+    def set_share(topic, selector, topics):
+        """Share one of `topic`'s trips with exactly `topics`. Returns a reply."""
+        names = {w["topic"]: w["name"] for w in load_config()["watchers"]}
+        result = {}
+
+        def apply(trip, rest):
+            result["added"] = trips.share_with(trip, [t for t in topics if t in names], topic)
+            result["trip"] = dict(trip)
+            who = [names[t] for t in trip["shared_with"]]
+            return ("🔗 " + trip["flight"] + (" is shared with " + ", ".join(who) + "." if who else " isn't shared with anyone."), True)
+
+        reply = trips.modify(topic, selector, apply, time.time(), cfg["time_zone"])
+        if result.get("added"):
+            announce_share(result["trip"], result["added"])
+        return reply
+
+    def on_share(topic, text, adding):
+        """Text commands "share 1 Mom & Dad" / "unshare 1 Mom & Dad"."""
+        mine = trips.for_topic(topic)
+        trip, rest = trips.select(mine, text, time.time(), cfg["time_zone"])
+        if trip is None:
+            return rest
+        want = rest.strip().lower()
+        match = [w for w in load_config()["watchers"]
+                 if w["topic"] != topic and want in (w["name"].lower(), w["topic"].lower())]
+        if not match:
+            others = ", ".join(w["name"] for w in load_config()["watchers"] if w["topic"] != topic) or "nobody yet"
+            return f"🤷 No watcher called \"{rest.strip()}\". You can share with: {others}."
+        current = list(trip.get("shared_with") or [])
+        topics = current + [match[0]["topic"]] if adding else [t for t in current if t != match[0]["topic"]]
+        number = next(i for i, x in enumerate(mine, 1) if x["flight"] == trip["flight"] and x["date"] == trip["date"])
+        return set_share(topic, str(number), topics)
+
     def on_command(topic, text):
         hist.add("in", topic, text, kind="command", status="received")
         verb, ident, _, _ = commands.parse(text)
-        if verb in ("inbound", "trips", "cancel", "change"):
+        if verb in ("inbound", "trips", "cancel", "change", "share", "unshare"):
             if not any(w["topic"] == topic for w in cfg["watchers"]):
                 return
             now = time.time()
@@ -476,6 +518,8 @@ def run():
                 reply = trips.describe_all(trips.for_topic(topic), cfg["time_zone"])
             elif verb == "change":
                 reply = trips.modify(topic, ident, on_change, now, cfg["time_zone"])
+            elif verb in ("share", "unshare"):
+                reply = on_share(topic, ident, verb == "share")
             else:
                 reply = trips.modify(topic, ident, on_cancel, now, cfg["time_zone"])
             log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0])
@@ -539,17 +583,31 @@ def run():
         return False
 
     def track_trips(fixes, errors):
-        """Re-check AeroDataBox where due, poll each trip's plane, send trip alerts.
+        """Re-check AeroDataBox where due, poll each trip's planes, send trip alerts.
 
-        Returns True if the ADS-B feed rate-limited us.
+        Two kinds of tracking per trip: the inbound plane (alerts to you), and,
+        if you shared the trip, your own flight (departed/landed alerts to the
+        people you shared it with). Returns True if the ADS-B feed rate-limited us.
         """
-        topics = {w["topic"] for w in cfg["watchers"]}
+        by_topic = {w["topic"]: w for w in cfg["watchers"]}
+        outgoing = []  # ntfy payloads
+
+        def to_owner(t, title, message, priority, hexcode=None):
+            outgoing.append({"topic": t["topic"], "title": title, "message": message, "tags": ["airplane"],
+                             "priority": priority,
+                             "click": f"https://globe.adsbexchange.com/?icao={hexcode}" if hexcode else None})
+
+        def to_shared(t, title, message, priority):
+            for topic in t.get("shared_with") or []:
+                if topic in by_topic:
+                    outgoing.append({"topic": topic, "title": title, "message": message,
+                                     "tags": ["airplane"], "priority": priority})
+
         with trips.TRIPS_LOCK:
             now = time.time()
             all_trips = trips.load()
-            active = [t for t in all_trips if trips.expires_at(t) > now and t.get("topic") in topics]
+            active = [t for t in all_trips if trips.expires_at(t) > now and t.get("topic") in by_topic]
             changed = len(active) != len(all_trips)
-            outgoing = []
             for t in active:
                 level = trips.check_level(t, now) if cfg["adb_key"] else None
                 if not level:
@@ -566,9 +624,16 @@ def run():
                     continue
                 mine = sorted((x for x in active if x["topic"] == t["topic"]), key=trips.sort_key)
                 number = next(i for i, x in enumerate(mine, 1) if x is t)
-                outgoing += [(t, *m) for m in trips.change_messages(t, notes, cfg["time_zone"], number)]
+                for m in trips.change_messages(t, notes, cfg["time_zone"], number):
+                    to_owner(t, *m)
+                owner = by_topic[t["topic"]]["name"]
+                for m in trips.share_note_messages(t, notes, owner, cfg["time_zone"]):
+                    to_shared(t, *m)
+
             live = [t for t in active if not t.get("landed") and trips.is_live(t, now)]
-            for kind, key in {trips.inbound_key(t) for t in live} - {None}:
+            own = [t for t in active if trips.own_live(t, now)]
+            wanted = {trips.inbound_key(t) for t in live} | {("flight", t["callsign"]) for t in own}
+            for kind, key in wanted - {None}:
                 if key in fixes:
                     continue
                 try:
@@ -580,6 +645,7 @@ def run():
                 except (urllib.error.URLError, OSError, ValueError) as e:
                     errors.append(f"{key}: {e}")
                 time.sleep(1.1)
+
             for t in live:
                 k = trips.inbound_key(t)
                 if not k or k[1] not in fixes:
@@ -588,14 +654,35 @@ def run():
                                   lambda trip, cs: trips.route_destination(trip, cs, USER_AGENT))
                 if msgs:
                     changed = True
-                    outgoing += [(t, *m) for m in msgs]
+                    for m in msgs:
+                        to_owner(t, *m, hexcode=(fixes.get(k[1]) or {}).get("hex"))
+
+            for t in own:
+                if t["callsign"] not in fixes:
+                    continue
+                fix = fixes[t["callsign"]]
+                st, event = observe(t.get("own") or {}, fix, now)
+                if fix is not None:
+                    st["last_fix"] = {k: fix.get(k) for k in ("lat", "lon", "alt_baro", "gs", "track", "t", "flight", "r", "hex")}
+                t["own"], sent = st, t.setdefault("own_sent", {})
+                changed = True
+                kind = ("departed" if event in ("departed", "airborne") and not sent.get("departed")
+                        else "landed" if event in ("landed", "lost_low") and sent.get("departed") and not sent.get("landed")
+                        else None)
+                if not kind:
+                    continue
+                sent[kind] = True
+                owner = by_topic[t["topic"]]["name"]
+                ac = fix or {**(st.get("last_fix") or {}), "hex": st.get("hex")}
+                alert = event if kind == "landed" else ("departed" if event == "departed" else "airborne")
+                for topic in t.get("shared_with") or []:
+                    if topic in by_topic:
+                        outgoing.append(build_message(cfg, by_topic[topic], t["flight"], f"{owner}'s flight",
+                                                      ac, alert, airports, "flight"))
             if changed:
                 trips.save(active)
-        for t, title, message, priority in outgoing:
-            hexcode = (fixes.get((trips.inbound_key(t) or (None, None))[1]) or {}).get("hex")
-            payload = {"topic": t["topic"], "title": title, "message": message,
-                       "tags": ["airplane"], "priority": priority,
-                       "click": f"https://globe.adsbexchange.com/?icao={hexcode}" if hexcode else None}
+
+        for payload in outgoing:
             if not send(payload):
                 retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
         return False
@@ -620,9 +707,20 @@ def run():
                     "hex": s_.get("hex"), "alt": fix.get("alt_baro"), "gs": fix.get("gs"),
                     "callsign": (fix.get("flight") or "").strip(), "type": fix.get("t"), "reg": fix.get("r")})
             watchers_out.append({"name": w["name"], "topic": w["topic"], "priority": w["priority"],
-                                 "notify_landing": w["notify_landing"], "aircraft": aircraft})
+                                 "notify_landing": w["notify_landing"], "aircraft": aircraft, "following": []})
         trips_out = []
         all_trips = trips.load()
+        by_topic = {w["topic"]: w for w in watchers_out}
+        for t in all_trips:
+            if t.get("topic") not in names:
+                continue
+            for topic in t.get("shared_with") or []:
+                if topic in by_topic:
+                    by_topic[topic]["following"].append({
+                        "owner": names[t["topic"]], "flight": t["flight"], "date": t["date"],
+                        "dep_time": t.get("dep_time"), "dep_airport": t.get("dep_airport"),
+                        "departed": bool((t.get("own_sent") or {}).get("departed")),
+                        "landed": bool((t.get("own_sent") or {}).get("landed"))})
         for topic, name in names.items():
             mine = sorted((t for t in all_trips if t.get("topic") == topic), key=trips.sort_key)
             for n, t in enumerate(mine, 1):
@@ -631,6 +729,8 @@ def run():
                     "departed", "landed", "eta_sent", "tight", "late", "missing", "replacement",
                     "last_check", "plane_locked")},
                     "topic": topic, "watcher": name, "number": n, "live": trips.is_live(t, now),
+                    "shared_with": [x for x in (t.get("shared_with") or []) if x in names],
+                    "shared_names": [names[x] for x in (t.get("shared_with") or []) if x in names],
                     "next_check": trips.next_check_time(t, now) if cur["adb_key"] else None})
         trips_out.sort(key=lambda t: t["dep_time"] or 0)
         return {
@@ -685,11 +785,26 @@ def run():
                 if topic not in names:
                     return 404, {"ok": False, "message": "That watcher no longer exists."}
                 now = time.time()
+                share = data.get("share")
+                if share is not None and not isinstance(share, list):
+                    return 400, {"ok": False, "message": "Bad request."}
                 if op == "add":
                     msg = on_inbound(topic, trip_text(data))
+                    if share and not msg.startswith(("❌", "🤔", "Tell me your flight")):
+                        flight = flights.parse_flight(str(data.get("flight") or ""))
+                        mine = trips.for_topic(topic)
+                        nums = [i for i, t in enumerate(mine, 1) if flight and t["flight"] == flight[0]
+                                and (not data.get("date") or t["date"] == data["date"])]
+                        if nums:
+                            msg += "\n" + set_share(topic, str(nums[-1]), [str(x) for x in share])
                 elif op == "change":
-                    msg = trips.modify(topic, trip_text(data, int(data.get("number") or 0)),
-                                       on_change, now, cfg["time_zone"])
+                    number = int(data.get("number") or 0)
+                    edits_text = trip_text(data, number)
+                    msg = (trips.modify(topic, edits_text, on_change, now, cfg["time_zone"])
+                           if edits_text != str(number) else "")
+                    if share is not None and not msg.startswith(("🤔", "🤷", "❌")):
+                        shared = set_share(topic, str(number), [str(x) for x in share])
+                        msg = f"{msg}\n{shared}".strip() if msg else shared
                 elif op == "cancel":
                     msg = trips.modify(topic, str(int(data.get("number") or 0)), on_cancel, now, cfg["time_zone"])
                 else:

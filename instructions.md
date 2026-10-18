@@ -45,6 +45,7 @@ Type in your topic in the NTFY app (the message bar at the bottom) and TailWatch
 | `info UA1234` | The same for whichever plane is flying that flight right now |
 | `inbound UA1234 N38473 dep 4:30pm` | Follow the plane flying in for your flight (see **Where's my plane?** below) |
 | `trips` | Your trips, numbered, soonest first |
+| `share 1 Mom & Dad` / `unshare 1 Mom & Dad` | Send another watcher your flight's departure and landing for trip 1 (or stop) |
 | `change 1 AA5678` · `change 1 dep 5:10pm` · `change 1 N38473` · `change 1 11/15` · `change 1 from DFW` | Update trip 1: new flight number, departure time, plane, date or airport |
 | `cancel 1` | Stop tracking trip 1 (or `cancel AA1234`) |
 | `help` | Show the commands |
@@ -105,6 +106,18 @@ A trip added a month ahead uses about 20 requests in all.
 **If the airline renumbers or cancels your flight**, AeroDataBox stops listing it. TailWatcher notices on its next check and tells you. It also searches your airport's departures around the original time for the same airline to the same destination. If it finds a likely match, the message says e.g. "Looks like it's now AA5678, departing 4:10pm to KDFW. Reply \"change 2 AA5678\" to switch." It never switches on its own, so it can't end up following the wrong flight.
 
 Arrival estimates come from the plane's live position and speed, so treat them as a heads-up rather than the airline's official time. Times are shown in the time zone set in Configure. Trips clear themselves a few hours after departure.
+
+## Sharing a trip with family
+
+Your trip alerts are about the plane flying in to pick *you* up. Family usually just wants to know when your flight leaves and lands. **Share** the trip with them: tick their names under **Share with** when adding or editing a trip on the dashboard, or text `share 1 Mom & Dad` (the trip number from `trips`, then their watcher name).
+
+They need their own watcher (with the ntfy app on their phone, subscribed to their topic), but no extra topic: shared flights arrive on it like anything else. They get:
+
+- 📣 a note right away that you've shared a flight with them
+- 🕓 / ⚠️ a heads-up if the departure time changes or the flight disappears (renumbered or cancelled), when you have an AeroDataBox key
+- ✈️ a departure alert and 🛬 a landing alert on the day, with a live-map button
+
+They don't get your inbound-plane updates. TailWatcher only follows your flight from a few hours before departure, so a flight number shared weeks ahead doesn't alert on the other days it flies. If you change the trip (new flight number, date or time), their alerts follow; cancelling the trip stops them.
 
 ## Adding another person
 

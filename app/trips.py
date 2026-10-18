@@ -230,6 +230,10 @@ def new_trip(flight, date, dep_time, dep_airport, inbound, now):
         # missing = it no longer does (renumbered or cancelled?).
         "seen": False, "missing": False, "replacement": None,
         "arr_airport": None, "sched_dep_local": None,
+        # Sharing: other watchers' topics who get your own flight's departure
+        # and landing (not the inbound-plane alerts). own = observe() state for
+        # your flight's callsign; own_sent = which shared alerts went out.
+        "shared_with": [], "own": {}, "own_sent": {},
         # progress
         "departed": False, "landed": False, "eta_sent": None,
         "tight": False, "late": False, "leg_note": None, "near_low": None, "routes": {},
@@ -673,6 +677,58 @@ def change_messages(trip, notes, tz_name, number=None):
 
 
 LIVE_BEFORE_H = 24  # start following the plane this long before departure
+OWN_BEFORE_H = 3    # for shared trips, follow your own flight from this long before departure...
+OWN_AFTER_H = 20    # ...until it lands, or this long after departure
+
+
+def own_live(trip, now):
+    """Is it time to follow your own flight for the people you shared it with?
+
+    Only around departure: the same flight number flies every day, so a
+    flight shared a month ahead must not alert on the other 29 days."""
+    if not trip.get("shared_with") or (trip.get("own_sent") or {}).get("landed"):
+        return False
+    if trip.get("dep_time"):
+        return trip["dep_time"] - OWN_BEFORE_H * 3600 <= now <= trip["dep_time"] + OWN_AFTER_H * 3600
+    d = datetime.date.fromisoformat(trip["date"])
+    start = datetime.datetime.combine(d, datetime.time(0), datetime.timezone.utc).timestamp() - 14 * 3600
+    return start <= now <= date_end(trip) + 12 * 3600
+
+
+def share_with(trip, topics, own_topic):
+    """Set who the trip is shared with. Returns the topics newly added."""
+    wanted = [t for t in dict.fromkeys(topics) if t and t != own_topic]
+    added = [t for t in wanted if t not in (trip.get("shared_with") or [])]
+    trip["shared_with"] = wanted
+    return added
+
+
+def share_announcement(trip, owner, tz_name):
+    """What a watcher gets when a trip is shared with them."""
+    when = f"departs {fmt_time(trip['dep_time'], tz_name)}" if trip.get("dep_time") else ""
+    where = f"from {trip['dep_airport']}" if trip.get("dep_airport") else ""
+    detail = " ".join(x for x in (when, where) if x)
+    return (f"📣 {owner} shared a flight with you",
+            f"{trip['flight']} · {fmt_day(trip, tz_name)}{', ' + detail if detail else ''}.\n"
+            "You'll get an alert when it departs and when it lands.", 3)
+
+
+def share_note_messages(trip, notes, owner, tz_name):
+    """AeroDataBox changes worth passing on to the people a trip is shared with
+    (time changes and disappearances; not plane swaps, which only matter to you)."""
+    out = []
+    for kind, old, new in notes:
+        if kind == "dep_change":
+            later = "later" if new > old else "earlier"
+            out.append((f"🕓 {owner}'s flight {trip['flight']}: new time",
+                        f"Now departs {fmt_time(new, tz_name)} ({later} than {fmt_time(old, tz_name)}).", 4))
+        elif kind == "missing":
+            out.append((f"⚠️ {owner}'s flight {trip['flight']} changed",
+                        f"{trip['flight']} on {fmt_day(trip, tz_name)} is no longer listed; the airline may "
+                        f"have renumbered or cancelled it. {owner} will update it.", 4))
+        elif kind == "back":
+            out.append((f"✅ {owner}'s flight {trip['flight']} is listed again", "Tracking continues.", 3))
+    return out
 
 
 def is_live(trip, now):

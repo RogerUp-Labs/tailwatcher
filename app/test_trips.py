@@ -414,3 +414,42 @@ class StorageTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShareTest(unittest.TestCase):
+    def setUp(self):
+        self.t = trips.parse_inbound("UA1234 N38473 11/14 dep 4:05pm from IAD", NOON, TZ, AIR)
+        self.t["topic"] = "tailwatcher_sam"
+
+    def test_share_list(self):
+        added = trips.share_with(self.t, ["tailwatcher_dad", "tailwatcher_sam", "tailwatcher_dad", "tailwatcher_mom"],
+                                 "tailwatcher_sam")
+        self.assertEqual(added, ["tailwatcher_dad", "tailwatcher_mom"])       # not yourself, no duplicates
+        self.assertEqual(trips.share_with(self.t, ["tailwatcher_mom"], "tailwatcher_sam"), [])
+        self.assertEqual(self.t["shared_with"], ["tailwatcher_mom"])
+
+    def test_only_followed_around_departure(self):
+        self.assertFalse(trips.own_live(self.t, ts(2026, 11, 14, 14)))   # not shared yet
+        trips.share_with(self.t, ["tailwatcher_dad"], "tailwatcher_sam")
+        self.assertFalse(trips.own_live(self.t, NOON))                    # a month out: the flight flies daily
+        self.assertFalse(trips.own_live(self.t, ts(2026, 11, 14, 12)))
+        self.assertTrue(trips.own_live(self.t, ts(2026, 11, 14, 13, 30)))
+        self.assertTrue(trips.own_live(self.t, ts(2026, 11, 15, 8)))
+        self.assertFalse(trips.own_live(self.t, ts(2026, 11, 15, 13)))
+        self.t["own_sent"] = {"departed": True, "landed": True}
+        self.assertFalse(trips.own_live(self.t, ts(2026, 11, 14, 18)))     # done once it has landed
+
+    def test_messages_for_family(self):
+        title, msg, _ = trips.share_announcement(self.t, "Sam", TZ)
+        self.assertEqual(title, "📣 Sam shared a flight with you")
+        self.assertIn("UA1234 · Sat Nov 14, departs 4:05pm from KIAD", msg)
+        notes = [("dep_change", ts(2026, 11, 14, 16, 5), ts(2026, 11, 14, 17)), ("plane_change", "N1", "N2"),
+                 ("missing", None, None)]
+        out = trips.share_note_messages(self.t, notes, "Sam", TZ)
+        self.assertEqual(len(out), 2)                                       # plane swaps are only for you
+        self.assertIn("Now departs 5:00pm (later than 4:05pm)", out[0][1])
+        self.assertIn("no longer listed", out[1][1])
+
+    def test_share_commands_parse(self):
+        self.assertEqual(commands.parse("share 1 Mom & Dad")[:2], ("share", "1 Mom & Dad"))
+        self.assertEqual(commands.parse("unshare 2 Dad")[:2], ("unshare", "2 Dad"))
