@@ -2,7 +2,7 @@
 """TailWatcher: push an ntfy notification when a watched aircraft takes off.
 
 Polls a public, unfiltered ADS-B API (adsb.lol or adsb.fi) for each
-tail number, tracks ground/airborne/unseen per aircraft, and publishes to each
+tail number or flight number (by ICAO callsign), tracks ground/airborne/unseen per aircraft, and publishes to each
 watcher's ntfy topic on departure (and optionally on landing). Each tail is
 polled once however many watchers follow it. Standard library only.
 
@@ -25,17 +25,20 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import commands
-from commands import normalize_tail
+import flights
+from commands import entry_key, normalize_tail
 
 CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-USER_AGENT = "TailWatcher/0.3 (+https://github.com/homebrew-gh/tailwatcher)"
+USER_AGENT = "TailWatcher/0.4 (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
-    "adsb.lol": "https://api.adsb.lol/v2/reg/{reg}",
-    "adsb.fi": "https://opendata.adsb.fi/api/v2/registration/{reg}",
+    "adsb.lol": {"tail": "https://api.adsb.lol/v2/reg/{key}",
+                 "flight": "https://api.adsb.lol/v2/callsign/{key}"},
+    "adsb.fi": {"tail": "https://opendata.adsb.fi/api/v2/registration/{key}",
+                "flight": "https://opendata.adsb.fi/api/v2/callsign/{key}"},
 }
 MAP_LINKS = {
     "adsbx": ("ADS-B Exchange", "https://globe.adsbexchange.com/?icao={hex}"),
@@ -60,7 +63,8 @@ log = logging.getLogger("tailwatcher")
 # ---------------------------------------------------------------- config
 
 
-def load_config(path=CONFIG_PATH):
+def load_config(path=CONFIG_PATH, now=None):
+    now = time.time() if now is None else now
     try:
         with open(path) as f:
             raw = json.load(f)
@@ -83,9 +87,20 @@ def load_config(path=CONFIG_PATH):
         topic = (w.get("topic") or "").strip()
         aircraft = []
         for a in w.get("aircraft") or []:
-            tail = normalize_tail(a.get("tail") or "")
-            if tail:
-                aircraft.append({"tail": tail, "label": (a.get("label") or "").strip()})
+            kind = "flight" if a.get("kind") == "flight" else "tail"
+            expires = a.get("expires")
+            if isinstance(expires, (int, float)) and expires <= now:
+                continue  # removed from the file at the next cycle
+            if kind == "flight":
+                parsed = flights.parse_flight(a.get("tail") or "")
+                ident = parsed[0] if parsed else flights.compact(a.get("tail"))
+            else:
+                ident = normalize_tail(a.get("tail") or "")
+            if ident:
+                entry = {"tail": ident, "label": (a.get("label") or "").strip(), "kind": kind,
+                         "expires": expires if isinstance(expires, (int, float)) else None}
+                entry["key"] = entry_key(entry)
+                aircraft.append(entry)
         if topic:
             watchers.append({
                 "name": (w.get("name") or topic).strip(),
@@ -106,14 +121,15 @@ def load_config(path=CONFIG_PATH):
 
 
 def subscriptions(cfg):
-    """Map each tail to the watchers following it, so every tail is polled once.
+    """Map each tail/callsign to the watchers following it, so each is polled once.
 
-    Returns {tail: [(watcher, label), ...]} in first-seen order.
+    Returns {key: [(watcher, entry), ...]} in first-seen order, where key is
+    the tail number or the flight's ICAO callsign.
     """
     subs = {}
     for w in cfg["watchers"]:
         for a in w["aircraft"]:
-            subs.setdefault(a["tail"], []).append((w, a["label"]))
+            subs.setdefault(a["key"], []).append((w, a))
     return subs
 
 
@@ -196,8 +212,11 @@ def observe(prev, ac, now):
 # ----------------------------------------------------------------- ntfy
 
 
-def build_message(cfg, watcher, tail, label, ac, event, airports):
-    name = f"{tail} ({label})" if label else tail
+def build_message(cfg, watcher, tail, label, ac, event, airports, kind="tail"):
+    # A flight's title names the aircraft flying it: "UA1234 (N38473) departed".
+    reg = (ac.get("r") or "").strip() if kind == "flight" else ""
+    extra = ", ".join(x for x in (label, reg) if x)
+    name = f"{tail} ({extra})" if extra else tail
     verb = {
         "departed": "departed",
         "airborne": "is airborne",
@@ -225,7 +244,7 @@ def build_message(cfg, watcher, tail, label, ac, event, airports):
     if stats:
         lines.append(" · ".join(stats))
     callsign = (ac.get("flight") or "").strip()
-    ident = [x for x in (ac.get("t"), callsign if callsign != tail else None) if x]
+    ident = [x for x in (ac.get("t"), callsign if callsign not in (tail, "") else None) if x]
     if ident:
         lines.append(" · ".join(ident))
     if event == "lost_low":
@@ -264,17 +283,24 @@ def publish(ntfy_url, token, payload, timeout=15):
 # ------------------------------------------------------------- polling
 
 
-def fetch_aircraft(source, tail, timeout=15):
-    url = DATA_SOURCES.get(source, DATA_SOURCES["adsb.lol"]).format(reg=tail)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = json.load(r)
-    matches = [a for a in data.get("ac") or [] if normalize_tail(a.get("r") or "") == tail]
+def pick_match(data, key, kind="tail"):
+    """The best record for a tail (`r`) or callsign (trimmed `flight`)."""
+    if kind == "flight":
+        matches = [a for a in data.get("ac") or [] if flights.matches(a, key)]
+    else:
+        matches = [a for a in data.get("ac") or [] if normalize_tail(a.get("r") or "") == key]
     if not matches:
         return None
     # Prefer a fix with a position, then the freshest one.
     matches.sort(key=lambda a: (a.get("lat") is None, a.get("seen", 99)))
     return matches[0]
+
+
+def fetch_aircraft(source, key, kind="tail", timeout=15):
+    url = DATA_SOURCES.get(source, DATA_SOURCES["adsb.lol"])[kind].format(key=key)
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return pick_match(json.load(r), key, kind)
 
 
 def config_mtime():
@@ -389,6 +415,19 @@ def run():
 
     backoff, error_streak = 0, 0
     while True:
+        # Trip entries ("UA1234 for 2 days") remove themselves; the file
+        # change is picked up just below.
+        try:
+            expired = commands.remove_expired(CONFIG_PATH)
+        except (OSError, ValueError) as e:
+            log.error("removing expired entries: %s", e)
+            expired = []
+        for topic, ident in expired:
+            log.info("%s: expired for %s", ident, topic)
+            if ntfy_url:
+                send({"topic": topic, "message": f"⌛ Stopped watching {ident} (expired)",
+                      "tags": ["robot"], "priority": 2})
+
         mtime = config_mtime()
         if mtime != cfg_mtime:
             # Configure (StartOS) or a text command changed the file: apply it
@@ -397,7 +436,8 @@ def run():
             subs = subscriptions(cfg)
             for w in cfg["watchers"]:
                 log.info("watcher %s → topic %s: %s", w["name"], w["topic"],
-                         ", ".join(a["tail"] for a in w["aircraft"]) or "(none yet)")
+                         ", ".join(a["tail"] if a["kind"] == "tail" else f"{a['tail']} ({a['key']})"
+                                   for a in w["aircraft"]) or "(none yet)")
             log.info("polling %d aircraft via %s every %ss, ntfy %s, text commands %s",
                      len(subs), cfg["data_source"], cfg["poll_seconds"], ntfy_url,
                      "on" if cfg["text_commands"] else "off")
@@ -426,33 +466,35 @@ def run():
         if retry_queue:
             errors.append(f"ntfy: {len(retry_queue)} alert(s) waiting to retry")
 
-        for tail, followers in subs.items():
+        for key, followers in subs.items():
+            kind, shown = followers[0][1]["kind"], followers[0][1]["tail"]
             try:
-                ac = fetch_aircraft(cfg["data_source"], tail)
+                ac = fetch_aircraft(cfg["data_source"], key, kind)
             except urllib.error.HTTPError as e:
-                errors.append(f"{tail}: {e}")
+                errors.append(f"{shown}: {e}")
                 if e.code == 429:
                     rate_limited = True
                     break  # stop hammering; back off below
                 continue
             except (urllib.error.URLError, OSError, ValueError) as e:
-                errors.append(f"{tail}: {e}")
+                errors.append(f"{shown}: {e}")
                 continue
-            st, event = observe(state.get(tail, {}), ac, time.time())
+            st, event = observe(state.get(key, {}), ac, time.time())
             if ac is not None:
-                st["last_fix"] = {k: ac.get(k) for k in ("lat", "lon", "alt_baro", "gs", "track", "t", "flight")}
+                st["last_fix"] = {k: ac.get(k) for k in ("lat", "lon", "alt_baro", "gs", "track", "t", "flight", "r")}
             if st.get("status") == "airborne":
-                airborne.append(tail)
+                airborne.append(shown)
             if event:
-                log.info("%s: %s", tail, event)
+                log.info("%s: %s", key, event)
                 fix = ac or {**(st.get("last_fix") or {}), "hex": st.get("hex")}
-                for watcher, label in followers:
+                for watcher, entry in followers:
                     if event in ("landed", "lost_low") and not watcher["notify_landing"]:
                         continue
-                    payload = build_message(cfg, watcher, tail, label, fix, event, airports)
+                    payload = build_message(cfg, watcher, entry["tail"], entry["label"], fix, event,
+                                            airports, entry["kind"])
                     if not send(payload):
                         retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
-            state[tail] = st
+            state[key] = st
             time.sleep(1.1)  # stay under the APIs' ~1 req/s limit
         save_state({**state, "_retry": retry_queue})
 
@@ -470,7 +512,7 @@ def run():
         elif backoff:
             health.set(True, f"Rate limited by {cfg['data_source']}, retrying in {backoff}s{flying}", airborne=airborne)
         elif not subs:
-            health.set(True, "No aircraft yet. Text a tail number to a watcher's topic, or use Configure.")
+            health.set(True, "No aircraft yet. Text a tail or flight number to a watcher's topic, or use Configure.")
         else:
             n_w = len(cfg["watchers"])
             health.set(True, f"Watching {len(subs)} aircraft for {n_w} watcher{'s' if n_w != 1 else ''}{flying}",

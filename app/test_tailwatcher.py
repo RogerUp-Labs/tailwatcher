@@ -80,6 +80,14 @@ class MessageTest(unittest.TestCase):
         self.assertNotIn("KFDK", m["message"])
         self.assertTrue(m["message"].startswith("34,000 ft"))
 
+    def test_flight_title_names_the_aircraft(self):
+        fix = ac(2500, r="N38473", flight="UAL1234 ", t="B39M")
+        m = tw.build_message(self.cfg, self.watcher, "UA1234", "", fix, "departed", self.airports, "flight")
+        self.assertEqual(m["title"], "UA1234 (N38473) departed")
+        self.assertIn("B39M · UAL1234", m["message"])
+        m = tw.build_message(self.cfg, self.watcher, "UA1234", "Mom", fix, "airborne", self.airports, "flight")
+        self.assertEqual(m["title"], "UA1234 (Mom, N38473) is airborne")
+
     def test_tail_normalization(self):
         self.assertEqual(tw.normalize_tail(" n-123ab "), "N123AB")
 
@@ -102,7 +110,8 @@ class ConfigTest(unittest.TestCase):
         w = cfg["watchers"][0]
         self.assertEqual((w["name"], w["topic"], w["priority"]), ("Me", "tailwatcher", "high"))
         self.assertTrue(w["notify_landing"])
-        self.assertEqual(w["aircraft"], [{"tail": "N12345", "label": "Dad"}])
+        self.assertEqual(w["aircraft"], [{"tail": "N12345", "label": "Dad", "kind": "tail",
+                                          "expires": None, "key": "N12345"}])
         self.assertEqual(cfg["ntfy_token"], "tk_x")
 
     def test_shared_tail_polled_once_for_both_watchers(self):
@@ -117,8 +126,32 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual([w["name"] for w in cfg["watchers"]], ["Sam", "Dad", "Empty"])
         subs = tw.subscriptions(cfg)
         self.assertEqual(list(subs), ["N12345", "N628TS"])
-        self.assertEqual([(w["name"], label) for w, label in subs["N12345"]],
+        self.assertEqual([(w["name"], a["label"]) for w, a in subs["N12345"]],
                          [("Sam", ""), ("Dad", "Sam's plane")])
+
+    def test_flights_share_a_callsign_and_expired_entries_are_skipped(self):
+        cfg = tw.load_config(self.write({"watchers": [
+            {"name": "Sam", "topic": "tailwatcher_sam", "aircraft": [
+                {"tail": "UA1234", "label": "", "kind": "flight", "expires": None},
+                {"tail": "DL089", "label": "", "kind": "flight", "expires": T0 - 1}]},
+            {"name": "Dad", "topic": "tailwatcher_dad", "aircraft": [
+                {"tail": "UAL1234", "label": "Sam", "kind": "flight", "expires": T0 + 60}]},
+        ]}), now=T0)
+        subs = tw.subscriptions(cfg)
+        self.assertEqual(list(subs), ["UAL1234"])
+        self.assertEqual([a["tail"] for _, a in subs["UAL1234"]], ["UA1234", "UAL1234"])
+
+
+class MatchTest(unittest.TestCase):
+    def test_callsign_match_uses_trimmed_flight(self):
+        data = {"ac": [
+            {"hex": "1", "flight": "UAL12345", "r": "N1"},
+            {"hex": "2", "flight": "UAL1234 ", "r": "N38473", "lat": 39.0, "seen": 2},
+            {"hex": "3", "r": "N2"},
+        ]}
+        self.assertEqual(tw.pick_match(data, "UAL1234", "flight")["r"], "N38473")
+        self.assertIsNone(tw.pick_match(data, "UAL123", "flight"))
+        self.assertEqual(tw.pick_match(data, "N2")["hex"], "3")
 
 
 if __name__ == "__main__":

@@ -1,18 +1,19 @@
 # TailWatcher
 
-Headless StartOS 0.4 service: watches tail numbers on free ADS-B feeds and pushes NTFY alerts on takeoff (optionally landing), with links to ADS-B Exchange. Config is a list of **watchers** (name, NTFY topic, aircraft list, landing toggle, priority); each tail is polled once and fanned out to every watcher following it.
+Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on free ADS-B feeds and pushes NTFY alerts on takeoff (optionally landing), with links to ADS-B Exchange. Config is a list of **watchers** (name, NTFY topic, aircraft list, landing toggle, priority); each tail/callsign is polled once and fanned out to every watcher following it. Aircraft entries are `{tail, label, kind: 'tail'|'flight', expires: unix|null}` (`tail` holds the flight number for flights).
 
 ## Layout
 
 - `app/tailwatcher.py` — the watcher (Python stdlib only). Reads `/data/config.json`, keeps per-aircraft state in `/data/state.json`, serves `/health` on :8080, publishes JSON to `$NTFY_URL`.
-- `app/commands.py` — text commands: one ntfy JSON stream per watcher topic (`TopicListener`), `parse()`, and `apply_command()` which edits `config.json` under `CONFIG_LOCK`. Messages tagged with `OWN_TAGS` (airplane, airplane_arriving, robot, test_tube) are TailWatcher's own and ignored, so keep every published message tagged.
-- `app/test_tailwatcher.py`, `app/test_commands.py` — unit tests (`make test`).
+- `app/flights.py` — IATA→ICAO airline map, `parse_flight()` (the tail-vs-flight rule), callsign matching on the trimmed `flight` field.
+- `app/commands.py` — text commands: one ntfy JSON stream per watcher topic (`TopicListener`), `parse()` (incl. expiry phrases), `apply_command()` and `remove_expired()`, which edit `config.json` under `CONFIG_LOCK`. The entry shape must match `startos/fileModels/config.json.ts`. Messages tagged with `OWN_TAGS` (airplane, airplane_arriving, robot, test_tube) are TailWatcher's own and ignored, so keep every published message tagged.
+- `app/test_tailwatcher.py`, `app/test_commands.py`, `app/test_flights.py` — unit tests (`make test`).
 - `Dockerfile` — python:3.12-alpine; bakes a trimmed OurAirports CSV for "nearest airport".
 - `startos/` — StartOS package (SDK 1.5.2, same as the homebrew-suite packages). `actions/configure.ts` is the settings form, written to `config.json` via `fileModels/config.json.ts`; `main.ts` resolves NTFY's bridge address; the watcher hot-reloads `config.json` by mtime (Configure and text commands both write it), so config changes don't restart the service.
 
 ## Build
 
-- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.3.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
+- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.4.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
 - Packing needs a git commit (it records the hash) and the `assets/` dir.
 - `make install` sideloads to the host in `~/.startos/config.yaml`.
 
@@ -26,3 +27,5 @@ Headless StartOS 0.4 service: watches tail numbers on free ADS-B feeds and pushe
 - Dependency title/icon only show if `manifest.dependencies.ntfy.s9pk` points at a real NTFY s9pk; a `metadata` block is ignored by start-cli.
 - airplanes.live now requires approval (403); data sources are adsb.lol and adsb.fi. Both rate-limit (~1 req/s); the watcher backs off on 429.
 - Detection: ground→air = "departed"; first seen airborne after 20+ min unseen = "is airborne" (small fields lack ground coverage).
+- Flights are polled by callsign (`/v2/callsign/{CS}` on both adsb.lol and adsb.fi) and state is keyed by callsign, so "UA1234" and "UAL1234" are one entry. Tail-vs-flight rule lives in `flights.parse_flight` (dash or N+digit → tail; 3 letters+digits or a known IATA code+1–4 digits → flight; else tail). New Python modules must be added to the Dockerfile `COPY` line.
+- Expiry: the watcher calls `remove_expired()` at the top of each cycle and posts "⌛ Stopped watching X (expired)"; `load_config` also skips expired entries. "until fri" = 3am the next day in `timeZone` (Configure, default America/New_York); the container is UTC, so never use the container date. The Configure form shows `expiresDays`; saving it unchanged keeps the stored `expires`.

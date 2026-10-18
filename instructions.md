@@ -1,6 +1,6 @@
 # TailWatcher
 
-TailWatcher sends a push notification, through NTFY on this server, when an aircraft someone follows takes off. Each **watcher** is one person with their own NTFY topic and their own list of aircraft.
+TailWatcher sends a push notification, through NTFY on this server, when an aircraft someone follows takes off. Each **watcher** is one person with their own NTFY topic and their own list of tail numbers and flight numbers.
 
 ## Setup
 
@@ -8,7 +8,7 @@ TailWatcher sends a push notification, through NTFY on this server, when an airc
 2. **Configure TailWatcher.** Open **TailWatcher → Actions → Configure**, paste the **token**, and add a watcher:
    - **Name**, e.g. `Sam`
    - **NTFY Topic**, e.g. `tailwatcher_sam`
-   - **Aircraft:** each tail number (e.g. `N12345`), with an optional nickname
+   - **Aircraft:** each tail number (e.g. `N12345`) or flight number (e.g. `UA1234`, with **Type** set to Flight number), with an optional nickname and an optional **Stop Watching After** (days)
 3. **Subscribe on the phone.** In the NTFY Android app, add your server, log in, and subscribe to the watcher's topic.
 4. **Turn on text commands (optional, recommended).** In NTFY, run **Grant User Topic Access** for user `pkg_tailwatcher`, topic `tailwatcher*`, permission **Read-Write**, so TailWatcher can read what you send.
 5. Run **TailWatcher → Actions → Send Test Notification**. It sends to every watcher's topic and shows which ones worked.
@@ -19,13 +19,25 @@ Type in your topic in the NTFY app (the message bar at the bottom) and TailWatch
 
 | Send | Does |
 |---|---|
-| `N12345` | Watch N12345 |
+| `N12345` | Watch tail number N12345 |
+| `UA1234` (or `DL 89`, `UAL1234`) | Watch a flight number, whichever aircraft flies it |
 | `add N12345 Vegas trip` | Watch it with a nickname (or rename one you already watch) |
+| `UA1234 for 2 days` | Watch it, then stop automatically. Also `3d`, `12h`, `for 6 hours` |
+| `add UA1234 Mom until fri` | Watch it through Friday night (until 3am Saturday). Also `until tomorrow` |
 | `remove N12345` | Stop watching |
-| `list` | Show your aircraft and which are airborne |
+| `list` | Show your list, what's airborne, and time left on expiring entries |
 | `help` | Show the commands |
 
-A plane you add is checked right away; if it's already flying, you get the "airborne" alert within seconds. Changes show up in **Configure** too. Each person can only change their own list, since they can only post to their own topic. Turn this off with **Text Commands** in Configure.
+A plane you add is checked right away; if it's already flying, you get the "airborne" alert within seconds. Sending an entry you already watch with a new expiry (`UA1234 for 3d`) updates it. When an entry expires, TailWatcher removes it and posts "⌛ Stopped watching UA1234 (expired)". "until" uses the **Time Zone** set in Configure. Changes show up in **Configure** too. Each person can only change their own list, since they can only post to their own topic. Turn this off with **Text Commands** in Configure.
+
+## Flight numbers
+
+Airlines pick the aircraft for a flight on the day, so after booking a trip, watch the flight number instead of a tail. TailWatcher looks it up by the callsign the airline broadcasts (UA1234 → UAL1234) and the alert names the aircraft flying it: **UA1234 (N38473) departed**.
+
+- Type flight numbers the way they appear on your ticket: `UA1234`, `DL 89`, `B6 123`. Major US and international airlines are recognized; for others, type the ICAO callsign directly (`UAL1234`).
+- Some airlines (Ryanair, easyJet) broadcast callsigns that differ from the flight number, like `RYR5TM`. Use that callsign if the flight number doesn't alert.
+- A flight number is watched every day it flies, so give trips an expiry: `UA1234 for 2 days`.
+- How TailWatcher tells them apart: a registration with a dash (`G-ABCD`, `B-6123`) or a US N-number (`N12345`) is always a tail. A known airline code followed by 1–4 digits (`UA1234`), or any three letters followed by digits (`UAL1234`), is a flight. Anything else is a tail (`JA8089`).
 
 ## Adding another person
 

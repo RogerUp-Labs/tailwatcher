@@ -17,7 +17,9 @@ export const v0_2_0 = VersionInfo.of({
           {
             name: 'Me',
             topic: typeof raw.ntfyTopic === 'string' ? raw.ntfyTopic : 'tailwatcher',
-            aircraft: raw.aircraft as { tail: string; label: string }[],
+            aircraft: (raw.aircraft as { tail: string; label: string }[]).map(
+              (a) => ({ ...a, kind: 'tail' as const, expires: null }),
+            ),
             notifyLanding: raw.notifyLanding === true,
             priority: (['low', 'default', 'high', 'max'].includes(raw.priority as string)
               ? raw.priority
@@ -31,6 +33,7 @@ export const v0_2_0 = VersionInfo.of({
           ? raw.mapLinks
           : 'adsbx') as 'adsbx' | 'adsblol' | 'both',
         textCommands: true,
+        timeZone: 'America/New_York',
       })
     },
     down: IMPOSSIBLE,

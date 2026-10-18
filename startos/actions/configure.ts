@@ -1,13 +1,21 @@
-import { configJson } from '../fileModels/config.json'
+import { Aircraft, configJson, timeZones } from '../fileModels/config.json'
 import { sdk } from '../sdk'
 
 const { InputSpec, Value, List } = sdk
 
+const DAY = 86400
+
+/** Days left on an entry, as shown in the form (one decimal). */
+const daysLeft = (expires: number | null, now: number) =>
+  expires === null
+    ? null
+    : Math.max(0.1, Math.round(((expires - now) / DAY) * 10) / 10)
+
 const aircraftSpec = InputSpec.of({
   tail: Value.text({
-    name: 'Tail Number',
+    name: 'Tail or Flight Number',
     description:
-      'The aircraft registration, e.g. N12345 or G-ABCD. Dashes and spaces are ignored.',
+      'An aircraft registration (N12345, G-ABCD) or an airline flight number (UA1234, DL89, or the ICAO callsign UAL1234). Set Type to match. Dashes and spaces are ignored.',
     required: true,
     default: null,
     placeholder: 'N12345',
@@ -26,6 +34,27 @@ const aircraftSpec = InputSpec.of({
     default: null,
     placeholder: "Dad's Cessna",
     maxLength: 40,
+  }),
+  kind: Value.select({
+    name: 'Type',
+    description:
+      'Flight numbers are matched by the callsign the airline broadcasts, so you are alerted whichever aircraft flies it, and the alert names that aircraft.',
+    default: 'tail',
+    values: {
+      tail: 'Tail number',
+      flight: 'Flight number',
+    },
+  }),
+  expiresDays: Value.number({
+    name: 'Stop Watching After',
+    description:
+      'Optional. Remove this entry automatically after this many days, e.g. for a trip. Leave empty to watch it until you remove it. Text commands set this too ("UA1234 for 2 days").',
+    required: false,
+    default: null,
+    min: 0.1,
+    max: 365,
+    integer: false,
+    units: 'days',
   }),
 })
 
@@ -57,7 +86,7 @@ const watcherSpec = InputSpec.of({
       {
         name: 'Aircraft',
         description:
-          'Tail numbers this watcher gets alerts for. Several watchers can follow the same aircraft.',
+          'Tail numbers and flight numbers this watcher gets alerts for. Several watchers can follow the same aircraft.',
         default: [],
         maxLength: 50,
       },
@@ -123,8 +152,15 @@ const inputSpec = InputSpec.of({
   textCommands: Value.toggle({
     name: 'Text Commands',
     description:
-      'Let each watcher change their own list by typing in their NTFY topic: send a tail number to add it, "remove N12345" to drop it, "list" to see it. Requires granting pkg_tailwatcher Read-Write on tailwatcher* in NTFY, and each watcher\'s user Read-Write on their topic.',
+      'Let each watcher change their own list by typing in their NTFY topic: send a tail or flight number to add it ("UA1234 for 2 days" to have it expire), "remove N12345" to drop it, "list" to see it. Requires granting pkg_tailwatcher Read-Write on tailwatcher* in NTFY, and each watcher\'s user Read-Write on their topic.',
     default: true,
+  }),
+  timeZone: Value.select({
+    name: 'Time Zone',
+    description:
+      'Used by text commands like "UA1234 until fri": the entry is watched through Friday night (until 3am Saturday) in this time zone.',
+    default: 'America/New_York',
+    values: timeZones,
   }),
   mapLinks: Value.select({
     name: 'Map Buttons',
@@ -166,7 +202,7 @@ export const configure = sdk.Action.withInput(
   async () => ({
     name: 'Configure',
     description:
-      'Set up watchers (who gets alerts, on which NTFY topic, for which tail numbers). Changes apply within a few seconds.',
+      'Set up watchers (who gets alerts, on which NTFY topic, for which tail and flight numbers). Changes apply within a few seconds.',
     warning: null,
     allowedStatuses: 'any',
     group: null,
@@ -178,6 +214,7 @@ export const configure = sdk.Action.withInput(
   async () => {
     const c = await configJson.read().once()
     if (!c) return null
+    const now = Date.now() / 1000
     return {
       ...c,
       ntfyToken: c.ntfyToken || null,
@@ -186,19 +223,46 @@ export const configure = sdk.Action.withInput(
         aircraft: w.aircraft.map((a) => ({
           tail: a.tail,
           label: a.label || null,
+          kind: a.kind,
+          expiresDays: daysLeft(a.expires, now),
         })),
       })),
     }
   },
 
   async ({ effects, input }) => {
+    const prev = await configJson.read().once()
+    const now = Date.now() / 1000
+    const norm = (t: string) => t.toUpperCase().replace(/[^A-Z0-9]/g, '')
+
+    // The form shows days left; keep the stored expiry when that number is
+    // unchanged, so saving the form doesn't push every trip back.
+    const expiry = (
+      topic: string,
+      a: { tail: string; expiresDays: number | null },
+    ) => {
+      if (a.expiresDays === null) return null
+      const old: Aircraft | undefined = prev?.watchers
+        .find((w) => w.topic === topic)
+        ?.aircraft.find((p) => norm(p.tail) === norm(a.tail))
+      if (
+        old &&
+        old.expires !== null &&
+        daysLeft(old.expires, now) === a.expiresDays
+      )
+        return old.expires
+      return Math.round(now + a.expiresDays * DAY)
+    }
+
     await configJson.write(effects, {
       watchers: input.watchers.map((w) => ({
         name: w.name.trim(),
         topic: w.topic,
         aircraft: w.aircraft.map((a) => ({
-          tail: a.tail.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+          tail: norm(a.tail),
           label: a.label?.trim() ?? '',
+          kind: a.kind,
+          expires: expiry(w.topic, a),
         })),
         notifyLanding: w.notifyLanding,
         priority: w.priority,
@@ -208,6 +272,7 @@ export const configure = sdk.Action.withInput(
       dataSource: input.dataSource,
       mapLinks: input.mapLinks,
       textCommands: input.textCommands,
+      timeZone: input.timeZone,
     })
     return null
   },

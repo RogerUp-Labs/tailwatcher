@@ -8,9 +8,11 @@ export const main = sdk.setupMain(async ({ effects }) => {
   const config = await configJson.read().once()
   const ntfy = (await ntfyUrl(effects).const()) ?? ntfyFallbackUrl
   const watchers = config?.watchers ?? []
-  const tails = new Set(watchers.flatMap((w) => w.aircraft.map((a) => a.tail)))
+  const entries = new Set(
+    watchers.flatMap((w) => w.aircraft.map((a) => a.tail)),
+  )
   console.info(
-    `Starting TailWatcher: ${tails.size} aircraft for ${watchers.length} watcher(s), NTFY at ${ntfy}`,
+    `Starting TailWatcher: ${entries.size} tail/flight number(s) for ${watchers.length} watcher(s), NTFY at ${ntfy}`,
   )
 
   const subcontainer = await sdk.SubContainer.of(
