@@ -141,4 +141,4 @@ Tapping the alert opens the aircraft live on ADS-B Exchange (or adsb.lol, set in
 - These feeds are unfiltered: aircraft that FlightAware and Flightradar24 hide under the FAA's LADD program still appear. Aircraft in the FAA's privacy (PIA) program broadcast a rotating address and can't be tracked by tail number anywhere.
 - The service's health check shows which watched aircraft are airborne right now, and reports any watcher topic that NTFY refused.
 - If NTFY is briefly unreachable, alerts are retried for 30 minutes and sent only to watchers who haven't received them yet.
-- If the feed rate-limits TailWatcher, it backs off automatically (up to 10 minutes). Raise **Check Every** if you watch many aircraft.
+- All watched aircraft are checked together in one request per cycle (one per 25 aircraft), so watching more planes doesn't mean more requests. If a feed says "too many requests", TailWatcher uses the other feed for that check, and backs off if both refuse. adsb.lol allows only 500 requests a day, so adsb.fi is the default.

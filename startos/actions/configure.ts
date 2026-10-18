@@ -191,17 +191,17 @@ const inputSpec = InputSpec.of({
   dataSource: Value.select({
     name: 'ADS-B Data Source',
     description:
-      'Free, unfiltered ADS-B feed to poll. Both show aircraft that FlightAware and Flightradar24 hide (FAA LADD).',
-    default: 'adsb.lol',
+      'Free, unfiltered ADS-B feed to poll; if it refuses, TailWatcher uses the other one for that check. Both show aircraft that FlightAware and Flightradar24 hide (FAA LADD). adsb.lol allows only 500 requests a day, so adsb.fi is the better everyday choice.',
+    default: 'adsb.fi',
     values: {
-      'adsb.lol': 'adsb.lol',
       'adsb.fi': 'adsb.fi',
+      'adsb.lol': 'adsb.lol',
     },
   }),
   pollSeconds: Value.number({
     name: 'Check Every',
     description:
-      'How often to check each aircraft. Each tail is checked once no matter how many watchers follow it. Lower is faster to alert but makes more requests to the free API.',
+      'How often to check. All watched aircraft are checked together (one request covers up to 25), so 60 seconds is about 60 requests an hour however many you watch. Lower alerts sooner.',
     required: true,
     default: 60,
     min: 15,

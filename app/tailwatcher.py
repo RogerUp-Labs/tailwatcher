@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import commands
@@ -36,7 +37,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.10.0"
+VERSION = "0.11.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
@@ -120,7 +121,7 @@ def load_config(path=CONFIG_PATH, now=None):
         "ntfy_token": (raw.get("ntfyToken") or "").strip(),
         "poll_seconds": max(15, int(raw.get("pollSeconds") or 60)),
         "map_links": raw.get("mapLinks") or "adsbx",
-        "data_source": raw.get("dataSource") or "adsb.lol",
+        "data_source": raw.get("dataSource") or "adsb.fi",
         "text_commands": bool(raw.get("textCommands", True)),
         "time_zone": raw.get("timeZone") or commands.DEFAULT_TZ,
         "adb_key": (raw.get("aerodataboxKey") or "").strip(),
@@ -309,10 +310,60 @@ def pick_match(data, key, kind="tail"):
 
 
 def fetch_aircraft(source, key, kind="tail", timeout=15):
-    url = DATA_SOURCES.get(source, DATA_SOURCES["adsb.lol"])[kind].format(key=key)
+    url = DATA_SOURCES.get(source, DATA_SOURCES["adsb.fi"])[kind].format(key=key)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return pick_match(json.load(r), key, kind)
+
+
+BATCH = 25  # keys per request; both feeds take comma-separated lists
+
+
+def fetch_many(source, wanted, timeout=20, sleep=time.sleep, get=None):
+    """Look up many tails and callsigns in as few requests as possible.
+
+    wanted: {(kind, key)}. Returns {key: record or None}. Both feeds accept
+    "N1,N2,N3" in one request, so a cycle costs one request per 25 keys
+    instead of one per aircraft (adsb.lol allows only 500 requests a day).
+    Raises urllib errors; the caller falls back to the other feed.
+    """
+    templates = DATA_SOURCES.get(source, DATA_SOURCES["adsb.fi"])
+    out, first = {}, True
+    for kind in ("tail", "flight"):
+        keys = sorted(k for kd, k in wanted if kd == kind)
+        for i in range(0, len(keys), BATCH):
+            chunk = keys[i:i + BATCH]
+            if not first:
+                sleep(1.1)  # stay under 1 request per second
+            first = False
+            url = templates[kind].format(key=",".join(urllib.parse.quote(k) for k in chunk))
+            if get:
+                data = get(url)
+            else:
+                req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    data = json.load(r)
+            for key in chunk:
+                out[key] = pick_match(data, key, kind)
+    return out
+
+
+def poll_all(source, wanted, fetch=fetch_many):
+    """fetch_many with fallback: if the chosen feed refuses or fails, try the other.
+
+    Returns (fixes, error_text or None, rate_limited).
+    """
+    other = "adsb.lol" if source == "adsb.fi" else "adsb.fi"
+    problems, limited = [], False
+    for src in (source, other):
+        try:
+            return fetch(src, wanted), ("; ".join(problems) or None), False
+        except urllib.error.HTTPError as e:
+            limited = limited or e.code == 429
+            problems.append(f"{src}: {'too many requests' if e.code == 429 else e}")
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            problems.append(f"{src}: {e}")
+    return {}, "; ".join(problems), limited
 
 
 def web_password_required(path=CONFIG_PATH):
@@ -582,12 +633,29 @@ def run():
         record("retrying")
         return False
 
+    def trip_poll_keys():
+        """The trips' planes to include in this cycle's batched poll: inbound
+        planes in their last day, and your own flight around departure if shared."""
+        topics, now = {w["topic"] for w in cfg["watchers"]}, time.time()
+        with trips.TRIPS_LOCK:
+            all_trips = trips.load()
+        keys = set()
+        for t in all_trips:
+            if t.get("topic") not in topics or trips.expires_at(t) <= now:
+                continue
+            if not t.get("landed") and trips.is_live(t, now) and trips.inbound_key(t):
+                keys.add(trips.inbound_key(t))
+            if trips.own_live(t, now):
+                keys.add(("flight", t["callsign"]))
+        return keys
+
     def track_trips(fixes, errors):
         """Re-check AeroDataBox where due, poll each trip's planes, send trip alerts.
 
         Two kinds of tracking per trip: the inbound plane (alerts to you), and,
         if you shared the trip, your own flight (departed/landed alerts to the
-        people you shared it with). Returns True if the ADS-B feed rate-limited us.
+        people you shared it with). Uses the fixes from this cycle's batched poll
+        (trip_poll_keys() put the trips' planes in it).
         """
         by_topic = {w["topic"]: w for w in cfg["watchers"]}
         outgoing = []  # ntfy payloads
@@ -632,20 +700,6 @@ def run():
 
             live = [t for t in active if not t.get("landed") and trips.is_live(t, now)]
             own = [t for t in active if trips.own_live(t, now)]
-            wanted = {trips.inbound_key(t) for t in live} | {("flight", t["callsign"]) for t in own}
-            for kind, key in wanted - {None}:
-                if key in fixes:
-                    continue
-                try:
-                    fixes[key] = fetch_aircraft(cfg["data_source"], key, kind)
-                except urllib.error.HTTPError as e:
-                    errors.append(f"{key}: {e}")
-                    if e.code == 429:
-                        return True
-                except (urllib.error.URLError, OSError, ValueError) as e:
-                    errors.append(f"{key}: {e}")
-                time.sleep(1.1)
-
             for t in live:
                 k = trips.inbound_key(t)
                 if not k or k[1] not in fixes:
@@ -879,20 +933,17 @@ def run():
         if retry_queue:
             errors.append(f"ntfy: {len(retry_queue)} alert(s) waiting to retry")
 
+        wanted = {(followers[0][1]["kind"], key) for key, followers in subs.items()} | trip_poll_keys()
+        polled, poll_error, rate_limited = poll_all(cfg["data_source"], wanted) if wanted else ({}, None, False)
+        if poll_error:
+            errors.append(poll_error)
+        fixes.update(polled)
+
         for key, followers in subs.items():
             kind, shown = followers[0][1]["kind"], followers[0][1]["tail"]
-            try:
-                ac = fetch_aircraft(cfg["data_source"], key, kind)
-            except urllib.error.HTTPError as e:
-                errors.append(f"{shown}: {e}")
-                if e.code == 429:
-                    rate_limited = True
-                    break  # stop hammering; back off below
-                continue
-            except (urllib.error.URLError, OSError, ValueError) as e:
-                errors.append(f"{shown}: {e}")
-                continue
-            fixes[key] = ac
+            if key not in fixes:
+                continue  # the poll failed this cycle
+            ac = fixes[key]
             st, event = observe(state.get(key, {}), ac, time.time())
             if ac is not None:
                 st["last_fix"] = {k: ac.get(k) for k in ("lat", "lon", "alt_baro", "gs", "track", "t", "flight", "r")}
@@ -909,9 +960,8 @@ def run():
                     if not send(payload):
                         retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
             state[key] = st
-            time.sleep(1.1)  # stay under the APIs' ~1 req/s limit
-        if not rate_limited:
-            rate_limited = track_trips(fixes, errors) or rate_limited
+        if fixes or not wanted:
+            track_trips(fixes, errors)
         save_state({**state, "_retry": retry_queue})
         hist.save()
 

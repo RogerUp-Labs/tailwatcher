@@ -19,7 +19,7 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 
 ## Build
 
-- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.10.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
+- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.11.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
 - Packing needs a git commit (it records the hash) and the `assets/` dir.
 - `make install` sideloads to the host in `~/.startos/config.yaml`.
 
@@ -34,7 +34,7 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 - Config format changed in 0.2.0 (top-level `aircraft`/`ntfyTopic` → `watchers`). `versions/current.ts` migrates on update, and `load_config` in Python also accepts the old format.
 - The Configure form nests a list (aircraft) inside a list item (watcher). The SDK types allow it; check it renders well in the StartOS UI before relying on deeper nesting.
 - Dependency title/icon only show if `manifest.dependencies.ntfy.s9pk` points at a real NTFY s9pk; a `metadata` block is ignored by start-cli.
-- airplanes.live now requires approval (403); data sources are adsb.lol and adsb.fi. Both rate-limit (~1 req/s); the watcher backs off on 429.
+- airplanes.live now requires approval (403); data sources are adsb.fi (default) and adsb.lol. adsb.lol's headers say 4/s, 60/min and **500/day**, which one-request-per-aircraft polling blew through, so each cycle now does one batched poll (`fetch_many`: comma-separated keys, 25 per request, tails and callsigns separately) covering watched aircraft plus `trip_poll_keys()`; `poll_all` falls back to the other feed on errors/429. Never reintroduce per-aircraft requests in the loop.
 - Detection: ground→air = "departed"; first seen airborne after 20+ min unseen = "is airborne" (small fields lack ground coverage).
 - Flights are polled by callsign (`/v2/callsign/{CS}` on both adsb.lol and adsb.fi) and state is keyed by callsign, so "UA1234" and "UAL1234" are one entry. Tail-vs-flight rule lives in `flights.parse_flight` (dash or N+digit → tail; 3 letters+digits or a known IATA code+1–4 digits → flight; else tail). New Python modules must be added to the Dockerfile `COPY` line.
 - Expiry: the watcher calls `remove_expired()` at the top of each cycle and posts "⌛ Stopped watching X (expired)"; `load_config` also skips expired entries. "until fri" = 3am the next day in `timeZone` (Configure, default America/New_York); the container is UTC, so never use the container date. The Configure form shows `expiresDays`; saving it unchanged keeps the stored `expires`.

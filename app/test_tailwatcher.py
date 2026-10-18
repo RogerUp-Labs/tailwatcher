@@ -154,5 +154,42 @@ class MatchTest(unittest.TestCase):
         self.assertEqual(tw.pick_match(data, "N2")["hex"], "3")
 
 
+class BatchPollTest(unittest.TestCase):
+    def test_one_request_per_25_keys(self):
+        urls = []
+
+        def get(url):
+            urls.append(url)
+            return {"ac": [{"r": "N2", "hex": "a2", "alt_baro": 3000, "lat": 1, "lon": 2},
+                           {"r": "N9", "flight": "UAL567  ", "hex": "a9", "alt_baro": 9000}]}
+        wanted = {("tail", f"N{i}") for i in range(1, 31)} | {("flight", "UAL567")}
+        out = tw.fetch_many("adsb.fi", wanted, sleep=lambda s: None, get=get)
+        self.assertEqual(len(urls), 3)                       # 30 tails -> 2 requests, 1 flight -> 1
+        self.assertTrue(urls[0].startswith("https://opendata.adsb.fi/api/v2/registration/N1,N10,"))
+        self.assertIn("/api/v2/callsign/UAL567", urls[2])
+        self.assertEqual(out["N2"]["hex"], "a2")
+        self.assertIsNone(out["N3"])                          # asked about, not seen
+        self.assertEqual(out["UAL567"]["hex"], "a9")
+        self.assertEqual(len(out), 31)
+
+    def test_falls_back_to_the_other_feed(self):
+        import urllib.error
+        calls = []
+
+        def fetch(src, wanted):
+            calls.append(src)
+            if src == "adsb.lol":
+                raise urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
+            return {"N1": None}
+        fixes, err, limited = tw.poll_all("adsb.lol", {("tail", "N1")}, fetch=fetch)
+        self.assertEqual((calls, fixes, limited), (["adsb.lol", "adsb.fi"], {"N1": None}, False))
+        self.assertIn("adsb.lol: too many requests", err)
+
+        def both_fail(src, wanted):
+            raise urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
+        fixes, err, limited = tw.poll_all("adsb.fi", {("tail", "N1")}, fetch=both_fail)
+        self.assertEqual((fixes, limited), ({}, True))
+
+
 if __name__ == "__main__":
     unittest.main()

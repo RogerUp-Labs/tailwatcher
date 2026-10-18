@@ -52,7 +52,7 @@ const shape = z.object({
   watchers: z.array(watcher).catch([]),
   ntfyToken: z.string().catch(''),
   pollSeconds: z.number().catch(60),
-  dataSource: z.enum(['adsb.lol', 'adsb.fi']).catch('adsb.lol'),
+  dataSource: z.enum(['adsb.lol', 'adsb.fi']).catch('adsb.fi'),
   mapLinks: z.enum(['adsbx', 'adsblol', 'both']).catch('adsbx'),
   textCommands: z.boolean().catch(true),
   /** IANA zone for text commands like "until fri". */
