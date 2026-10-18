@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0e2546">
+<title>TailWatcher</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+:root {
+  --bg: #f3f5f9;
+  --surface: #ffffff;
+  --surface-2: #f7f9fc;
+  --border: #e3e8f0;
+  --text: #0f1b2d;
+  --text-2: #4a5a70;
+  --text-3: #7a889c;
+  --brand: #1f5fa8;
+  --brand-ink: #0e2546;
+  --brand-soft: #e6eefa;
+  --accent: #e8711f;
+  --accent-soft: #fdeee2;
+  --ok: #1e8a4c;
+  --ok-soft: #e3f4ea;
+  --warn: #b25e00;
+  --warn-soft: #fff1dc;
+  --bad: #c2312b;
+  --bad-soft: #fde7e6;
+  --air: #1f5fa8;
+  --air-soft: #e6eefa;
+  --shadow: 0 1px 2px rgba(15, 27, 45, .06), 0 2px 8px rgba(15, 27, 45, .04);
+  --radius: 14px;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a111e;
+    --surface: #111b2c;
+    --surface-2: #0e1727;
+    --border: #1f2c42;
+    --text: #e6edf7;
+    --text-2: #a9b6c9;
+    --text-3: #7486a0;
+    --brand: #6aa6ff;
+    --brand-ink: #e6edf7;
+    --brand-soft: #16284a;
+    --accent: #ff9a52;
+    --accent-soft: #3a2414;
+    --ok: #4cc983;
+    --ok-soft: #12301f;
+    --warn: #ffb547;
+    --warn-soft: #3a2a10;
+    --bad: #ff6b63;
+    --bad-soft: #3a1513;
+    --air: #6aa6ff;
+    --air-soft: #16284a;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+a { color: var(--brand); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 6px; }
+
+/* ---------- top bar ---------- */
+.top {
+  position: sticky; top: 0; z-index: 5;
+  background: linear-gradient(135deg, #0a1a33, #1f5fa8); color: #fff;
+  padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+}
+.top-inner { max-width: 1180px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+.top img { width: 34px; height: 34px; border-radius: 9px; flex: none; }
+.brand { font-weight: 700; font-size: 18px; letter-spacing: .2px; }
+.brand small { display: block; font-weight: 400; font-size: 12px; opacity: .75; }
+.status {
+  margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0;
+  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.18);
+  padding: 6px 10px; border-radius: 999px; font-size: 13px;
+}
+.status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42vw; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #4cc983; flex: none; box-shadow: 0 0 0 3px rgba(76,201,131,.25); }
+.dot.bad { background: #ff6b63; box-shadow: 0 0 0 3px rgba(255,107,99,.25); }
+.dot.wait { background: #ffb547; box-shadow: 0 0 0 3px rgba(255,181,71,.25); }
+
+/* ---------- layout ---------- */
+main { max-width: 1180px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 32px); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; box-shadow: var(--shadow); }
+.stat b { display: block; font-size: 24px; line-height: 1.2; }
+.stat span { color: var(--text-3); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.stat.hot b { color: var(--air); }
+.stat .short { display: none; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.col { display: grid; gap: 16px; min-width: 0; }
+section h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: .7px; color: var(--text-3);
+  margin: 4px 2px 8px; display: flex; align-items: center; gap: 8px;
+}
+section h2 .count { background: var(--surface); border: 1px solid var(--border); color: var(--text-2); border-radius: 999px; padding: 0 8px; font-size: 11px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.empty { padding: 18px; color: var(--text-3); text-align: center; font-size: 14px; }
+.empty code { background: var(--surface-2); border: 1px solid var(--border); padding: 1px 6px; border-radius: 6px; font-family: var(--mono); font-size: 13px; color: var(--text-2); }
+
+/* ---------- watchers ---------- */
+.watcher + .watcher { margin-top: 12px; }
+.w-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff; background: var(--brand); flex: none; }
+.w-name { font-weight: 650; }
+.w-topic { color: var(--text-3); font-size: 12px; font-family: var(--mono); }
+.w-tags { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--text-2); white-space: nowrap; }
+.tag.brand { background: var(--brand-soft); border-color: transparent; color: var(--brand); }
+.tag.accent { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.ac { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 11px 14px; align-items: center; }
+.ac + .ac { border-top: 1px solid var(--border); }
+.ac-id { font-family: var(--mono); font-weight: 700; font-size: 15px; letter-spacing: .3px; }
+.ac-id .nick { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-weight: 400; color: var(--text-2); letter-spacing: 0; margin-left: 6px; font-size: 14px; }
+.ac-meta { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 10px; color: var(--text-3); font-size: 13px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.chip.air { background: var(--air-soft); color: var(--air); }
+.chip.ground { background: var(--ok-soft); color: var(--ok); }
+.chip.unknown { background: var(--surface-2); color: var(--text-3); border: 1px solid var(--border); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 currentColor; } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+/* ---------- trips ---------- */
+.trip { padding: 14px; }
+.trip + .trip { border-top: 1px solid var(--border); }
+.t-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.t-flight { font-family: var(--mono); font-weight: 800; font-size: 20px; letter-spacing: .3px; }
+.t-when { color: var(--text-2); }
+.t-who { margin-left: auto; color: var(--text-3); font-size: 13px; }
+.route { display: flex; align-items: center; gap: 10px; margin: 10px 0 12px; }
+.apt { font-family: var(--mono); font-weight: 700; font-size: 17px; }
+.apt small { display: block; font-family: system-ui, sans-serif; font-weight: 400; font-size: 12px; color: var(--text-3); }
+.route .line { flex: 1; height: 2px; background: repeating-linear-gradient(90deg, var(--border) 0 6px, transparent 6px 11px); position: relative; }
+.route .line::after { content: "✈"; position: absolute; top: -11px; left: 50%; transform: translateX(-50%); color: var(--brand); font-size: 15px; background: var(--surface); padding: 0 4px; }
+.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 4px 0 10px; }
+.step { font-size: 11px; color: var(--text-3); text-align: center; }
+.step i { display: block; height: 4px; border-radius: 4px; background: var(--border); margin-bottom: 6px; }
+.step.done i { background: var(--brand); }
+.step.done { color: var(--text-2); }
+.step.now i { background: linear-gradient(90deg, var(--brand), var(--accent)); }
+.step.now { color: var(--text); font-weight: 600; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+.kv dt { color: var(--text-3); }
+.kv dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.banner { margin: 10px 0 0; padding: 9px 11px; border-radius: 10px; font-size: 13px; }
+.banner.warn { background: var(--warn-soft); color: var(--warn); }
+.banner.bad { background: var(--bad-soft); color: var(--bad); }
+.banner code { font-family: var(--mono); font-weight: 600; }
+
+/* ---------- activity ---------- */
+.feed { max-height: 760px; overflow: auto; }
+.day { position: sticky; top: 0; background: var(--surface-2); border-bottom: 1px solid var(--border); color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; padding: 6px 14px; }
+.ev { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 10px 14px; }
+.ev + .ev { border-top: 1px solid var(--border); }
+.ev-icon { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+.ev.in .ev-icon { background: var(--brand-soft); border-color: transparent; }
+.ev-head { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: var(--text-3); }
+.ev-head .who { color: var(--text-2); font-weight: 600; }
+.ev-head time { margin-left: auto; white-space: nowrap; }
+.ev-title { font-weight: 600; font-size: 14px; margin-top: 1px; }
+.ev-msg { color: var(--text-2); font-size: 13px; white-space: pre-line; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+.ev-msg.open { -webkit-line-clamp: unset; }
+.ev.in .ev-msg { font-family: var(--mono); color: var(--text); }
+.ev .chip { margin-top: 4px; }
+
+/* ---------- system ---------- */
+.sys { padding: 4px 0; }
+.row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; font-size: 14px; }
+.row + .row { border-top: 1px solid var(--border); }
+.row .label { color: var(--text-2); }
+.row .val { margin-left: auto; text-align: right; color: var(--text); font-size: 13px; }
+.ok { color: var(--ok); } .bad { color: var(--bad); } .muted { color: var(--text-3); }
+footer { color: var(--text-3); font-size: 12px; text-align: center; margin-top: 24px; }
+
+/* ---------- small screens ---------- */
+@media (max-width: 900px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .feed { max-height: none; }
+}
+@media (max-width: 560px) {
+  .stats { gap: 8px; }
+  .stat { padding: 9px 8px; text-align: center; }
+  .stat b { font-size: 20px; }
+  .stat .long { display: none; }
+  .stat .short { display: block; font-size: 10.5px; letter-spacing: .3px; }
+  .brand small { display: none; }
+  .status span { max-width: 46vw; }
+  .t-who { margin-left: 0; width: 100%; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <img src="icon.svg" alt="">
+    <div class="brand">TailWatcher<small id="sub">Takeoff alerts for the planes you follow</small></div>
+    <div class="status" role="status" aria-live="polite"><i class="dot wait" id="dot"></i><span id="statusText">Loading…</span></div>
+  </div>
+</header>
+
+<main>
+  <div class="stats" id="stats"></div>
+  <div class="grid">
+    <div class="col">
+      <section aria-labelledby="h-trips"><h2 id="h-trips">Trips <span class="count" id="c-trips">0</span></h2><div class="card" id="trips"></div></section>
+      <section aria-labelledby="h-watch"><h2 id="h-watch">Watchers <span class="count" id="c-watch">0</span></h2><div id="watchers"></div></section>
+    </div>
+    <div class="col">
+      <section aria-labelledby="h-act"><h2 id="h-act">Activity</h2><div class="card feed" id="feed"></div></section>
+      <section aria-labelledby="h-sys"><h2 id="h-sys">System</h2><div class="card sys" id="system"></div></section>
+    </div>
+  </div>
+  <footer id="foot"></footer>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+let TZ, NOW = Date.now() / 1000, lastLoad = 0;
+
+function fmtTime(t) { return new Intl.DateTimeFormat(undefined, {hour: "numeric", minute: "2-digit", timeZone: TZ}).format(t * 1000); }
+function fmtDay(t) { return new Intl.DateTimeFormat(undefined, {weekday: "short", month: "short", day: "numeric", timeZone: TZ}).format(t * 1000); }
+function fmtDate(iso) { const [y, m, d] = iso.split("-").map(Number); return new Intl.DateTimeFormat(undefined, {weekday: "short", month: "short", day: "numeric", timeZone: "UTC"}).format(Date.UTC(y, m - 1, d)); }
+function dayKey(t) { return new Intl.DateTimeFormat("en-CA", {timeZone: TZ}).format(t * 1000); }
+function ago(t) {
+  const s = Math.max(0, NOW - t);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 86400) return Math.round(s / 3600) + " h ago";
+  return Math.round(s / 86400) + " d ago";
+}
+function until(t) {
+  const s = t - NOW;
+  if (s <= 60) return "now";
+  if (s < 3600) return "in " + Math.round(s / 60) + " min";
+  if (s < 86400) return "in " + Math.round(s / 3600) + " h";
+  return "in " + Math.round(s / 86400) + " d";
+}
+const num = (n) => Number(n).toLocaleString();
+const initials = (name) => (name || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+const HUES = ["#1f5fa8", "#7a4cc2", "#1e8a6a", "#c2562b", "#a8326e", "#3a6f2a"];
+const hue = (i) => HUES[i % HUES.length];  // by watcher order, so neighbours never match
+const mapLink = (hex) => hex ? `https://globe.adsbexchange.com/?icao=${encodeURIComponent(hex)}` : null;
+
+function statusChip(a) {
+  if (a.status === "airborne") {
+    const bits = [typeof a.alt === "number" ? num(a.alt) + " ft" : "", a.gs ? Math.round(a.gs) + " kt" : ""].filter(Boolean).join(" · ");
+    return `<span class="chip air"><i class="pulse"></i>Airborne${bits ? " · " + bits : ""}</span>`;
+  }
+  if (a.status === "ground") return `<span class="chip ground">On the ground</span>`;
+  return `<span class="chip unknown">Not seen${a.last_seen ? " · " + ago(a.last_seen) : ""}</span>`;
+}
+
+function renderStats(d) {
+  const all = d.watchers.flatMap((w) => w.aircraft);
+  const unique = new Set(all.map((a) => a.ident));
+  const airborne = new Set(all.filter((a) => a.status === "airborne").map((a) => a.ident));
+  const upcoming = d.trips.filter((t) => !t.landed).length;
+  const alerts = d.history.filter((e) => e.dir === "out" && (e.kind === "alert" || e.kind === "trip") && NOW - e.t < 86400).length;
+  $("stats").innerHTML = [
+    ["Aircraft watched", unique.size, "", "Watched"], ["Airborne now", airborne.size, airborne.size ? "hot" : "", "Airborne"],
+    ["Upcoming trips", upcoming, "", "Trips"], ["Alerts · 24 h", alerts, "", "Alerts 24h"],
+  ].map(([label, n, cls, short]) => `<div class="stat ${cls}"><b>${n}</b><span class="long">${label}</span><span class="short">${short}</span></div>`).join("");
+}
+
+function renderWatchers(d) {
+  $("c-watch").textContent = d.watchers.length;
+  if (!d.watchers.length) {
+    $("watchers").innerHTML = `<div class="card empty">No watchers yet. Add one in TailWatcher → Actions → Configure.</div>`;
+    return;
+  }
+  const sorted = (list) => [...list].sort((a, b) => (b.status === "airborne") - (a.status === "airborne"));
+  $("watchers").innerHTML = d.watchers.map((w, wi) => `
+    <div class="card watcher">
+      <div class="w-head">
+        <div class="avatar" style="background:${hue(wi)}">${esc(initials(w.name))}</div>
+        <div><div class="w-name">${esc(w.name)}</div><div class="w-topic">${esc(w.topic)}</div></div>
+        <div class="w-tags">
+          ${w.priority !== "default" ? `<span class="tag accent">${esc(w.priority)} priority</span>` : ""}
+          ${w.notify_landing ? `<span class="tag">landings</span>` : ""}
+        </div>
+      </div>
+      ${w.aircraft.length ? sorted(w.aircraft).map((a) => {
+        const link = mapLink(a.hex);
+        const meta = [
+          a.kind === "flight" ? `<span class="tag brand">Flight</span>` : "",
+          a.kind === "flight" && a.reg ? `<span>flown by ${esc(a.reg)}</span>` : "",
+          a.type ? `<span>${esc(a.type)}</span>` : "",
+          a.callsign && a.callsign !== a.ident ? `<span>${esc(a.callsign)}</span>` : "",
+          a.expires ? `<span class="chip warn">stops ${until(a.expires)}</span>` : "",
+          link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">Live map ↗</a>` : "",
+        ].filter(Boolean).join("");
+        return `<div class="ac">
+          <div class="ac-id">${esc(a.ident)}${a.label ? `<span class="nick">${esc(a.label)}</span>` : ""}</div>
+          <div>${statusChip(a)}</div>
+          ${meta ? `<div class="ac-meta">${meta}</div>` : ""}
+        </div>`;
+      }).join("") : `<div class="empty">No aircraft yet. Text a tail number to <code>${esc(w.topic)}</code>.</div>`}
+    </div>`).join("");
+}
+
+function tripSteps(t) {
+  const assigned = !!(t.inbound && (t.inbound.tail || t.inbound.flight));
+  const stage = t.landed ? 4 : t.departed ? 3 : assigned ? 2 : 1;
+  return `<div class="steps">${["Scheduled", "Plane assigned", "On its way", "At the airport"].map((label, i) =>
+    `<div class="step ${i + 1 < stage ? "done" : i + 1 === stage ? "now" : ""}"><i></i>${label}</div>`).join("")}</div>`;
+}
+
+function renderTrips(d) {
+  const list = d.trips.filter((t) => !t.landed || NOW - (t.dep_time || NOW) < 3 * 3600);
+  $("c-trips").textContent = list.length;
+  if (!list.length) {
+    $("trips").innerHTML = `<div class="empty">No trips. Text <code>inbound UA1234 N38473 dep 4:30pm</code> to follow the plane flying in for your flight.</div>`;
+    return;
+  }
+  $("trips").innerHTML = list.map((t) => {
+    const inb = t.inbound || {};
+    const plane = inb.tail || inb.flight;
+    const rows = [];
+    if (plane) rows.push(["Your plane", `${esc(inb.tail || "")}${inb.tail && inb.flight ? " · " : ""}${esc(inb.flight || "")}${inb.origin ? ` from ${esc(inb.origin)}` : ""}${inb.arr_time ? `, due ${fmtTime(inb.arr_time)}` : ""}`]);
+    if (t.departed && !t.landed && t.eta_sent) rows.push(["Arriving", `around ${fmtTime(t.eta_sent)}${t.dep_time ? ` · ${Math.round((t.dep_time - t.eta_sent) / 60)} min before you leave` : ""}`]);
+    rows.push(["Source", t.source === "aerodatabox" ? (t.plane_locked ? "AeroDataBox (plane set by you)" : "AeroDataBox") : "Entered by text"]);
+    if (t.next_check) rows.push(["Next check", `${until(t.next_check)}${t.last_check ? ` · last ${ago(t.last_check)}` : ""}`]);
+    else if (t.last_check) rows.push(["Last checked", ago(t.last_check)]);
+    if (t.live && !t.landed) rows.push(["Tracking", `<span class="ok">live on ADS-B</span>`]);
+    let banner = "";
+    if (t.missing) {
+      const r = t.replacement;
+      banner = `<div class="banner bad">⚠️ No longer listed. Renumbered or cancelled?${r ? ` Likely now <code>${esc(r.flight)}</code> at ${fmtTime(r.dep_time)}. Text <code>change ${t.number} ${esc(r.flight)}</code> to switch.` : ` Text <code>change ${t.number} NEW123</code> with the new number.`}</div>`;
+    } else if (t.late && !t.landed) banner = `<div class="banner bad">⚠️ Your plane may land less than 20 minutes before your departure.</div>`;
+    else if (t.tight && !t.landed) banner = `<div class="banner warn">⏳ Tight turnaround: under 45 minutes between your plane landing and your departure.</div>`;
+    return `<article class="trip">
+      <div class="t-top">
+        <span class="t-flight">${esc(t.flight)}</span>
+        <span class="t-when">${t.dep_time ? `${fmtDay(t.dep_time)} · ${fmtTime(t.dep_time)}` : fmtDate(t.date)}</span>
+        <span class="t-who">${esc(t.watcher)} · trip ${t.number}</span>
+      </div>
+      <div class="route">
+        <div class="apt">${esc(t.dep_airport || "—")}<small>${t.dep_time ? "departs " + until(t.dep_time) : "departure"}</small></div>
+        <div class="line" aria-hidden="true"></div>
+        <div class="apt" style="text-align:right">${t.arr_airport ? `${esc(t.arr_airport)}<small>arrival</small>` : `<small>${esc(t.flight)}</small>`}</div>
+      </div>
+      ${tripSteps(t)}
+      <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+      ${banner}
+    </article>`;
+  }).join("");
+}
+
+const ICONS = {alert: "✈️", trip: "🧳", reply: "🤖", command: "💬", test: "🧪"};
+function renderFeed(d) {
+  if (!d.history.length) {
+    $("feed").innerHTML = `<div class="empty">Nothing yet. Alerts, replies and your text commands will show up here.</div>`;
+    return;
+  }
+  let html = "", lastDay = "";
+  for (const e of d.history) {
+    const day = dayKey(e.t);
+    if (day !== lastDay) { html += `<div class="day">${fmtDay(e.t)}</div>`; lastDay = day; }
+    const chip = e.status === "retrying" ? `<span class="chip warn">retrying</span>` : e.status === "refused" ? `<span class="chip bad">refused by NTFY</span>` : "";
+    html += `<div class="ev ${e.dir === "in" ? "in" : ""}">
+      <div class="ev-icon" aria-hidden="true">${ICONS[e.kind] || "•"}</div>
+      <div>
+        <div class="ev-head"><span class="who">${esc(e.watcher)}</span><span>${e.dir === "in" ? "texted" : esc(e.kind)}</span><time datetime="${new Date(e.t * 1000).toISOString()}">${fmtTime(e.t)}</time></div>
+        ${e.title ? `<div class="ev-title">${esc(e.title)}</div>` : ""}
+        <div class="ev-msg" title="Tap to expand">${esc(e.message)}</div>
+        ${chip}
+      </div>
+    </div>`;
+  }
+  $("feed").innerHTML = html;
+}
+
+function renderSystem(d) {
+  const s = d.settings, h = d.health;
+  const rows = [
+    ["Watcher", h.ok ? `<span class="ok">● running</span>` : `<span class="bad">● needs attention</span>`],
+    ["NTFY", s.ntfy ? `<span class="ok">connected</span>` : `<span class="bad">not reachable</span>`],
+    ["Text commands", !s.text_commands ? `<span class="muted">off</span>` : s.listening.length ? `<span class="ok">listening</span> <span class="muted">· ${s.listening.length} topic${s.listening.length === 1 ? "" : "s"}</span>` : `<span class="bad">can't read topics</span>`],
+    ["Trip lookups", s.aerodatabox ? `<span class="ok">AeroDataBox</span>` : `<span class="muted">manual (no key)</span>`],
+    ["ADS-B feed", esc(s.data_source)],
+    ["Checks every", s.poll_seconds + " s"],
+  ];
+  $("system").innerHTML = rows.map(([k, v]) => `<div class="row"><span class="label">${k}</span><span class="val">${v}</span></div>`).join("")
+    + (h.ok ? "" : `<div class="banner bad" style="margin:4px 14px 12px">${esc(h.message)}</div>`);
+}
+
+function render(d) {
+  TZ = d.time_zone; NOW = d.now; lastLoad = Date.now();
+  $("dot").className = "dot " + (d.health.ok ? "" : "bad");
+  $("statusText").textContent = d.health.message || (d.health.ok ? "Watching" : "Needs attention");
+  renderStats(d); renderTrips(d); renderWatchers(d); renderFeed(d); renderSystem(d);
+  $("foot").textContent = `TailWatcher ${d.version} · times in ${d.time_zone.replace("_", " ")} · updates every 20 s`;
+}
+
+async function load() {
+  try {
+    // Built from origin + path: a page opened as https://user:pass@host/ would
+    // otherwise hand its credentials to fetch(), which refuses them.
+    const url = location.origin + location.pathname.replace(/[^/]*$/, "") + "api/state";
+    const r = await fetch(url, {cache: "no-store", credentials: "same-origin"});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+  } catch (err) {
+    $("dot").className = "dot bad";
+    $("statusText").textContent = "Can't reach TailWatcher (" + err.message + ")";
+  }
+}
+
+document.addEventListener("click", (e) => { if (e.target.classList.contains("ev-msg")) e.target.classList.toggle("open"); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lastLoad > 15000) load(); });
+setInterval(() => { if (!document.hidden) load(); }, 20000);
+load();
+</script>
+</body>
+</html>

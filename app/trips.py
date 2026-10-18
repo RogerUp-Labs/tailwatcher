@@ -618,6 +618,19 @@ def check_level(trip, now):
     return "light" if not last or now - last >= interval else None
 
 
+def next_check_time(trip, now):
+    """When check_level() will next ask for an AeroDataBox check (for display)."""
+    if trip.get("source") != "aerodatabox" or trip.get("landed"):
+        return None
+    dep = trip.get("dep_time")
+    if dep and now >= dep - 25 * 3600:
+        upcoming = [dep - h * 3600 for h in trip.get("checkpoints") or [] if dep - h * 3600 > now]
+        return min(upcoming) if upcoming else None
+    ahead = (dep or date_end(trip)) - now
+    interval = 7 * 86400 if ahead > 14 * 86400 else 86400
+    return max(now, (trip.get("last_check") or now) + interval) if trip.get("last_check") else now
+
+
 def change_messages(trip, notes, tz_name, number=None):
     """Messages for resolve() notes. `number` is the trip's place in "trips"."""
     ref = str(number) if number else trip["flight"]

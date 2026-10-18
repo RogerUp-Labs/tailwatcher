@@ -17,6 +17,17 @@ TailWatcher sends a push notification, through NTFY on this server, when an airc
 3. **Subscribe on the phone.** In the NTFY Android app, add your server, log in, and subscribe to the watcher's topic.
 4. Run **TailWatcher → Actions → Send Test Notification**. It sends to every watcher's topic and shows which ones worked.
 
+## Web UI
+
+Open **TailWatcher → Web UI** (on your LAN, over Tor, or a public address if you've set one up) for a dashboard of:
+
+- **Trips:** each upcoming trip with its route, departure, the plane flying in, where it is in its journey, and when TailWatcher checks next
+- **Watchers:** each person's aircraft, which are airborne right now, and links to the live map
+- **Activity:** recent alerts, replies and the text commands people sent, including any NTFY didn't accept
+- **System:** whether NTFY, text commands and trip lookups are working
+
+Your browser asks for a username and password: any username, and the password from **Actions → Show Web UI Password**. **Reset Web UI Password** makes a new one. The dashboard is read-only for now; make changes with text commands or **Configure**.
+
 ## Text commands
 
 Type in your topic in the NTFY app (the message bar at the bottom) and TailWatcher replies there:

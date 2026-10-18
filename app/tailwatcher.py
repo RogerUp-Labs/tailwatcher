@@ -22,19 +22,21 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import commands
 import flights
+import history
 import lookup
 import trips
+import web
 from commands import entry_key, normalize_tail
 
 CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-USER_AGENT = "TailWatcher/0.7 (+https://github.com/homebrew-gh/tailwatcher)"
+VERSION = "0.8.0"
+USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
     "adsb.lol": {"tail": "https://api.adsb.lol/v2/reg/{key}",
@@ -347,20 +349,14 @@ class Health:
             return dict(self.status)
 
 
-def serve_health(health):
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            body = json.dumps(health.get()).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *args):
-            pass
-
-    srv = ThreadingHTTPServer(("0.0.0.0", HEALTH_PORT), Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+def message_kind(payload):
+    tags = set(payload.get("tags") or [])
+    if "test_tube" in tags:
+        return "test"
+    if tags & {"airplane", "airplane_arriving"}:
+        return "trip" if "🧳" in (payload.get("title") or "") or "your plane" in (payload.get("title") or "") \
+            else "alert"
+    return "reply"
 
 
 def run():
@@ -370,7 +366,7 @@ def run():
         stream=sys.stdout,
     )
     health = Health()
-    serve_health(health)
+    hist = history.History()
     ntfy_url = os.environ.get("NTFY_URL", "").strip()
     airports = Airports()
     state = load_state()
@@ -456,6 +452,7 @@ def run():
         return f"🗑 Stopped tracking {trip['flight']} on {trips.fmt_day(trip, cfg['time_zone'])}.", False
 
     def on_command(topic, text):
+        hist.add("in", topic, text, kind="command", status="received")
         verb, ident, _, _ = commands.parse(text)
         if verb in ("inbound", "trips", "cancel", "change"):
             if not any(w["topic"] == topic for w in cfg["watchers"]):
@@ -506,9 +503,13 @@ def run():
     def send(payload):
         """Publish once; queue transient failures for retry, record refusals."""
         topic = payload["topic"]
+
+        def record(status):
+            hist.add("out", topic, payload.get("message"), payload.get("title"), message_kind(payload), status)
         try:
             publish(ntfy_url, cfg["ntfy_token"], payload)
             topic_errors.pop(topic, None)
+            record("sent")
             return True
         except urllib.error.HTTPError as e:
             if e.code != 429 and e.code < 500:
@@ -516,11 +517,13 @@ def run():
                     f"NTFY refused topic {topic} (HTTP {e.code}); check the "
                     "publisher token has access to it")
                 log.error(topic_errors[topic])
+                record("refused")
                 return True  # retrying won't help; don't queue
             err = e
         except (urllib.error.URLError, OSError) as e:
             err = e
         log.error("ntfy publish to %s failed: %s (will retry)", topic, err)
+        record("retrying")
         return False
 
     def track_trips(fixes, errors):
@@ -584,6 +587,47 @@ def run():
             if not send(payload):
                 retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
         return False
+
+    def snapshot():
+        """Everything the web UI shows. Read-only; secrets are left out."""
+        now, st = time.time(), load_state()
+        names = {w["topic"]: w["name"] for w in cfg["watchers"]}
+        watchers_out = []
+        for w in cfg["watchers"]:
+            aircraft = []
+            for a in w["aircraft"]:
+                s_ = st.get(a["key"]) or {}
+                fix = s_.get("last_fix") or {}
+                aircraft.append({
+                    "ident": a["tail"], "kind": a["kind"], "label": a["label"], "expires": a["expires"],
+                    "status": s_.get("status") or "unknown", "last_seen": s_.get("last_seen"),
+                    "hex": s_.get("hex"), "alt": fix.get("alt_baro"), "gs": fix.get("gs"),
+                    "callsign": (fix.get("flight") or "").strip(), "type": fix.get("t"), "reg": fix.get("r")})
+            watchers_out.append({"name": w["name"], "topic": w["topic"], "priority": w["priority"],
+                                 "notify_landing": w["notify_landing"], "aircraft": aircraft})
+        trips_out = []
+        all_trips = trips.load()
+        for topic, name in names.items():
+            mine = sorted((t for t in all_trips if t.get("topic") == topic), key=trips.sort_key)
+            for n, t in enumerate(mine, 1):
+                trips_out.append({**{k: t.get(k) for k in (
+                    "flight", "date", "dep_time", "dep_airport", "arr_airport", "inbound", "source",
+                    "departed", "landed", "eta_sent", "tight", "late", "missing", "replacement",
+                    "last_check", "plane_locked")},
+                    "topic": topic, "watcher": name, "number": n, "live": trips.is_live(t, now),
+                    "next_check": trips.next_check_time(t, now) if cfg["adb_key"] else None})
+        trips_out.sort(key=lambda t: t["dep_time"] or 0)
+        return {
+            "now": now, "version": VERSION, "time_zone": cfg["time_zone"], "health": health.get(),
+            "settings": {"data_source": cfg["data_source"], "poll_seconds": cfg["poll_seconds"],
+                         "map_links": cfg["map_links"], "text_commands": cfg["text_commands"],
+                         "aerodatabox": bool(cfg["adb_key"]), "ntfy": bool(ntfy_url),
+                         "listening": sorted(names[k] for k in names if k not in listen_errors)},
+            "watchers": watchers_out, "trips": trips_out,
+            "history": [dict(e, watcher=names.get(e["topic"], e["topic"])) for e in hist.recent(150)],
+        }
+
+    web.serve(HEALTH_PORT, health, snapshot)
 
     backoff, error_streak = 0, 0
     while True:
@@ -673,6 +717,7 @@ def run():
         if not rate_limited:
             rate_limited = track_trips(fixes, errors) or rate_limited
         save_state({**state, "_retry": retry_queue})
+        hist.save()
 
         backoff = min(max(backoff * 2, 60), 600) if rate_limited else 0
         error_streak = error_streak + 1 if errors else 0
