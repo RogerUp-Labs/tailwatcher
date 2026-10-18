@@ -15,7 +15,7 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 
 ## Build
 
-- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.6.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
+- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.6.1`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
 - Packing needs a git commit (it records the hash) and the `assets/` dir.
 - `make install` sideloads to the host in `~/.startos/config.yaml`.
 

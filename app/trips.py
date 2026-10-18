@@ -180,10 +180,18 @@ def resolve_airport(code, airports):
     return code if code in airports.coords else None
 
 
+def date_end(trip):
+    """Unix time at the end of the trip's date (UTC-12, the last place it's still that day)."""
+    d = datetime.date.fromisoformat(trip["date"]) + datetime.timedelta(days=1)
+    return datetime.datetime.combine(d, datetime.time(12), datetime.timezone.utc).timestamp()
+
+
 def expires_at(trip):
+    """Drop a trip a few hours after departure; with no departure time, after
+    its date has ended everywhere (a trip added a month ahead stays a month)."""
     if trip.get("dep_time"):
         return trip["dep_time"] + KEEP_AFTER_DEP_H * 3600
-    return trip["created"] + KEEP_UNDATED_H * 3600
+    return max(trip["created"] + KEEP_UNDATED_H * 3600, date_end(trip) + KEEP_AFTER_DEP_H * 3600)
 
 
 # --------------------------------------------------------------- storage
@@ -411,7 +419,11 @@ def due_for_check(trip, now):
     if trip.get("source") != "aerodatabox" or trip.get("landed"):
         return False
     if not trip.get("dep_time"):
-        return not trip.get("last_check") or now - trip["last_check"] > 6 * 3600
+        # No schedule yet: once a day while the trip is more than 2 days off,
+        # every 6 hours after that.
+        far = date_end(trip) - now > 3 * 86400
+        interval = 24 * 3600 if far else 6 * 3600
+        return not trip.get("last_check") or now - trip["last_check"] > interval
     passed = [h for h in trip.get("checkpoints") or [] if now >= trip["dep_time"] - h * 3600]
     if not passed:
         return False

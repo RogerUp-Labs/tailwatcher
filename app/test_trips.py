@@ -141,6 +141,23 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(trips.resolve(trip, "k", "ua", get=self.fake_get([[]])[0]), [])
         self.assertIsNone(trip["inbound"])
 
+    def test_month_ahead_without_schedule(self):
+        trip = trips.parse_inbound("AA1234 11/14", NOON, TZ, AIR)
+        self.assertEqual(trip["date"], "2026-11-14")
+        self.assertIsNone(trip["dep_time"])
+        # Kept until the trip date, not 36h after it was added.
+        self.assertGreater(trips.expires_at(trip), ts(2026, 11, 15, 0))
+        self.assertLess(trips.expires_at(trip), ts(2026, 11, 16, 12))
+        # Checked once a day while far off, every 6h in the last couple of days.
+        trip["last_check"] = NOON
+        self.assertFalse(trips.due_for_check(trip, NOON + 12 * 3600))
+        self.assertTrue(trips.due_for_check(trip, NOON + 25 * 3600))
+        trip["last_check"] = ts(2026, 11, 13, 6)
+        self.assertTrue(trips.due_for_check(trip, ts(2026, 11, 13, 13)))
+        # Once AeroDataBox has the schedule, the departure-time checkpoints take over.
+        trip["dep_time"] = ts(2026, 11, 14, 16)
+        self.assertEqual(trips.expires_at(trip), ts(2026, 11, 14, 19))
+
     def test_checkpoints(self):
         trip = trips.parse_inbound("UA1234", NOON, TZ, AIR)
         trip["dep_time"] = ts(2026, 10, 20, 16, 30)
