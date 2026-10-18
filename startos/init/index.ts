@@ -10,9 +10,10 @@ import { versionGraph } from '../versions'
 /** On a fresh install, ask the user to add tail numbers and the NTFY token. */
 const configureTask = sdk.setupOnInit(async (effects, kind) => {
   if (kind !== 'install') return
-  if ((await configJson.read().once())?.aircraft.length) return
+  if ((await configJson.read().once())?.watchers.length) return
   await sdk.action.createOwnTask(effects, configure, 'critical', {
-    reason: 'Add the tail numbers to watch and your NTFY publisher token.',
+    reason:
+      'Add a watcher with the tail numbers to watch, and your NTFY publisher token.',
   })
 })
 

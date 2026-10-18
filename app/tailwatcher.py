@@ -2,8 +2,9 @@
 """TailWatcher: push an ntfy notification when a watched aircraft takes off.
 
 Polls a public, unfiltered ADS-B API (adsb.lol or adsb.fi) for each
-tail number, tracks ground/airborne/unseen per aircraft, and publishes to
-ntfy on departure (and optionally on landing). Standard library only.
+tail number, tracks ground/airborne/unseen per aircraft, and publishes to each
+watcher's ntfy topic on departure (and optionally on landing). Each tail is
+polled once however many watchers follow it. Standard library only.
 
 Config:  $TW_CONFIG (default /data/config.json), written by the StartOS
          Configure action.
@@ -28,7 +29,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-USER_AGENT = "TailWatcher/0.1 (+https://github.com/homebrew-gh/tailwatcher)"
+USER_AGENT = "TailWatcher/0.2 (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
     "adsb.lol": "https://api.adsb.lol/v2/reg/{reg}",
@@ -48,6 +49,8 @@ GAP_SECONDS = 20 * 60
 LOW_ALT_FT = 3000
 # Above this, "nearest airport" says nothing useful about where it came from.
 NEAR_AIRPORT_MAX_FT = 8000
+# Alerts that fail to publish (ntfy down) are retried for this long.
+RETRY_SECONDS = 30 * 60
 
 log = logging.getLogger("tailwatcher")
 
@@ -65,21 +68,54 @@ def load_config(path=CONFIG_PATH):
             raw = json.load(f)
     except FileNotFoundError:
         raw = {}
-    aircraft = []
-    for a in raw.get("aircraft") or []:
-        tail = normalize_tail(a.get("tail") or "")
-        if tail:
-            aircraft.append({"tail": tail, "label": (a.get("label") or "").strip()})
+
+    watchers_raw = raw.get("watchers")
+    if watchers_raw is None and raw.get("aircraft"):
+        # 0.1.x format: one aircraft list and one topic.
+        watchers_raw = [{
+            "name": "Me",
+            "topic": raw.get("ntfyTopic") or "tailwatcher",
+            "aircraft": raw["aircraft"],
+            "notifyLanding": raw.get("notifyLanding", False),
+            "priority": raw.get("priority", "default"),
+        }]
+
+    watchers = []
+    for w in watchers_raw or []:
+        topic = (w.get("topic") or "").strip()
+        aircraft = []
+        for a in w.get("aircraft") or []:
+            tail = normalize_tail(a.get("tail") or "")
+            if tail:
+                aircraft.append({"tail": tail, "label": (a.get("label") or "").strip()})
+        if topic and aircraft:
+            watchers.append({
+                "name": (w.get("name") or topic).strip(),
+                "topic": topic,
+                "aircraft": aircraft,
+                "notify_landing": bool(w.get("notifyLanding", False)),
+                "priority": w.get("priority") or "default",
+            })
+
     return {
-        "aircraft": aircraft,
-        "ntfy_topic": (raw.get("ntfyTopic") or "").strip(),
+        "watchers": watchers,
         "ntfy_token": (raw.get("ntfyToken") or "").strip(),
         "poll_seconds": max(15, int(raw.get("pollSeconds") or 60)),
-        "notify_landing": bool(raw.get("notifyLanding", False)),
         "map_links": raw.get("mapLinks") or "adsbx",
         "data_source": raw.get("dataSource") or "adsb.lol",
-        "priority": raw.get("priority") or "default",
     }
+
+
+def subscriptions(cfg):
+    """Map each tail to the watchers following it, so every tail is polled once.
+
+    Returns {tail: [(watcher, label), ...]} in first-seen order.
+    """
+    subs = {}
+    for w in cfg["watchers"]:
+        for a in w["aircraft"]:
+            subs.setdefault(a["tail"], []).append((w, a["label"]))
+    return subs
 
 
 # -------------------------------------------------------------- airports
@@ -161,9 +197,8 @@ def observe(prev, ac, now):
 # ----------------------------------------------------------------- ntfy
 
 
-def build_message(cfg, entry, ac, event, airports):
-    tail = entry["tail"]
-    name = f"{tail} ({entry['label']})" if entry["label"] else tail
+def build_message(cfg, watcher, tail, label, ac, event, airports):
+    name = f"{tail} ({label})" if label else tail
     verb = {
         "departed": "departed",
         "airborne": "is airborne",
@@ -206,11 +241,11 @@ def build_message(cfg, entry, ac, event, airports):
     ]
     tags = ["airplane"] if event in ("departed", "airborne") else ["airplane_arriving"]
     return {
-        "topic": cfg["ntfy_topic"],
+        "topic": watcher["topic"],
         "title": f"{name} {verb}",
         "message": "\n".join(lines) or verb,
         "tags": tags,
-        "priority": {"min": 1, "low": 2, "default": 3, "high": 4, "max": 5}.get(cfg["priority"], 3),
+        "priority": {"min": 1, "low": 2, "default": 3, "high": 4, "max": 5}.get(watcher["priority"], 3),
         "click": actions[0]["url"] if actions else None,
         "actions": actions,
     }
@@ -300,10 +335,8 @@ def run():
     ntfy_url = os.environ.get("NTFY_URL", "").strip()
 
     problems = []
-    if not cfg["aircraft"]:
-        problems.append("no tail numbers")
-    if not cfg["ntfy_topic"]:
-        problems.append("no ntfy topic")
+    if not cfg["watchers"]:
+        problems.append("no watchers with a topic and tail numbers")
     if not ntfy_url:
         problems.append("ntfy not reachable")
     if problems:
@@ -315,16 +348,54 @@ def run():
 
     airports = Airports()
     state = load_state()
-    tails = [a["tail"] for a in cfg["aircraft"]]
-    log.info("watching %s via %s, every %ss, ntfy %s topic %s",
-             ", ".join(tails), cfg["data_source"], cfg["poll_seconds"], ntfy_url, cfg["ntfy_topic"])
+    retry_queue = state.pop("_retry", [])
+    subs = subscriptions(cfg)
+    for w in cfg["watchers"]:
+        log.info("watcher %s → topic %s: %s", w["name"], w["topic"],
+                 ", ".join(a["tail"] for a in w["aircraft"]))
+    log.info("polling %d aircraft via %s every %ss, ntfy %s",
+             len(subs), cfg["data_source"], cfg["poll_seconds"], ntfy_url)
+
+    # Topics whose last publish was refused (bad grant/token), shown in health
+    # until a publish to that topic succeeds.
+    topic_errors = {}
+
+    def send(payload):
+        """Publish once; queue transient failures for retry, record refusals."""
+        topic = payload["topic"]
+        try:
+            publish(ntfy_url, cfg["ntfy_token"], payload)
+            topic_errors.pop(topic, None)
+            return True
+        except urllib.error.HTTPError as e:
+            if e.code != 429 and e.code < 500:
+                topic_errors[topic] = (
+                    f"NTFY refused topic {topic} (HTTP {e.code}); check the "
+                    "publisher token has access to it")
+                log.error(topic_errors[topic])
+                return True  # retrying won't help; don't queue
+            err = e
+        except (urllib.error.URLError, OSError) as e:
+            err = e
+        log.error("ntfy publish to %s failed: %s (will retry)", topic, err)
+        return False
 
     backoff, error_streak = 0, 0
     while True:
         started = time.time()
         errors, airborne, rate_limited = [], [], False
-        for entry in cfg["aircraft"]:
-            tail = entry["tail"]
+
+        still_pending = []
+        for item in retry_queue:
+            if started > item["until"]:
+                log.warning("giving up on alert to %s: %s", item["payload"]["topic"], item["payload"]["title"])
+            elif not send(item["payload"]):
+                still_pending.append(item)
+        retry_queue = still_pending
+        if retry_queue:
+            errors.append(f"ntfy: {len(retry_queue)} alert(s) waiting to retry")
+
+        for tail, followers in subs.items():
             try:
                 ac = fetch_aircraft(cfg["data_source"], tail)
             except urllib.error.HTTPError as e:
@@ -341,22 +412,18 @@ def run():
                 st["last_fix"] = {k: ac.get(k) for k in ("lat", "lon", "alt_baro", "gs", "track", "t", "flight")}
             if st.get("status") == "airborne":
                 airborne.append(tail)
-            notify = event in ("departed", "airborne") or (
-                cfg["notify_landing"] and event in ("landed", "lost_low"))
             if event:
                 log.info("%s: %s", tail, event)
-            if notify:
                 fix = ac or {**(st.get("last_fix") or {}), "hex": st.get("hex")}
-                try:
-                    publish(ntfy_url, cfg["ntfy_token"], build_message(cfg, entry, fix, event, airports))
-                except (urllib.error.URLError, OSError) as e:
-                    errors.append(f"ntfy: {e}")
-                    log.error("ntfy publish failed: %s", e)
-                    time.sleep(1.1)
-                    continue  # keep the old state so the alert retries next poll
+                for watcher, label in followers:
+                    if event in ("landed", "lost_low") and not watcher["notify_landing"]:
+                        continue
+                    payload = build_message(cfg, watcher, tail, label, fix, event, airports)
+                    if not send(payload):
+                        retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
             state[tail] = st
             time.sleep(1.1)  # stay under the APIs' ~1 req/s limit
-        save_state(state)
+        save_state({**state, "_retry": retry_queue})
 
         backoff = min(max(backoff * 2, 60), 600) if rate_limited else 0
         error_streak = error_streak + 1 if errors else 0
@@ -364,14 +431,17 @@ def run():
         if errors:
             log.warning("poll errors: %s%s", "; ".join(errors),
                         f" (rate limited, backing off {backoff}s)" if backoff else "")
-        if error_streak >= 3:
+        if topic_errors:
+            health.set(False, "; ".join(topic_errors.values())[:300], airborne=airborne)
+        elif error_streak >= 3:
             health.set(False, "Errors: " + "; ".join(errors)[:300], airborne=airborne)
         elif backoff:
             health.set(True, f"Rate limited by {cfg['data_source']}, retrying in {backoff}s{flying}", airborne=airborne)
         else:
-            health.set(True, f"Watching {len(tails)} aircraft{flying}", airborne=airborne)
+            n_w = len(cfg["watchers"])
+            health.set(True, f"Watching {len(subs)} aircraft for {n_w} watcher{'s' if n_w != 1 else ''}{flying}",
+                       airborne=airborne)
         time.sleep(max(0, cfg["poll_seconds"] + backoff - (time.time() - started)))
-
 
 if __name__ == "__main__":
     run()

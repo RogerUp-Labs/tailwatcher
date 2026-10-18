@@ -8,7 +8,7 @@ export const testNotification = sdk.Action.withoutInput(
   async () => ({
     name: 'Send Test Notification',
     description:
-      'Publish a sample takeoff alert to your NTFY topic to check that your phone receives it.',
+      "Publish a sample takeoff alert to every watcher's NTFY topic to check that each phone receives it.",
     warning: null,
     allowedStatuses: 'any',
     group: null,
@@ -17,44 +17,68 @@ export const testNotification = sdk.Action.withoutInput(
 
   async ({ effects }) => {
     const c = await configJson.read().once()
-    if (!c) throw new Error('Run Configure first.')
+    if (!c?.watchers.length) throw new Error('Add a watcher in Configure first.')
     const base = (await ntfyUrl(effects).once()) ?? ntfyFallbackUrl
     const hex = 'a835af'
-    const res = await fetch(base.replace(/\/$/, '') + '/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(c.ntfyToken ? { Authorization: `Bearer ${c.ntfyToken}` } : {}),
-      },
-      body: JSON.stringify({
-        topic: c.ntfyTopic,
-        title: 'TailWatcher test: N628TS departed',
-        message:
-          'at KFDK – Frederick Municipal Airport\n1,800 ft · 105 kt · hdg 270°\nThis is a test alert.',
-        tags: ['airplane', 'test_tube'],
-        click: `https://globe.adsbexchange.com/?icao=${hex}`,
-        actions: [
-          {
-            action: 'view',
-            label: 'ADS-B Exchange',
-            url: `https://globe.adsbexchange.com/?icao=${hex}`,
-          },
-        ],
+
+    const results = await Promise.all(
+      c.watchers.map(async (w) => {
+        try {
+          const res = await fetch(base.replace(/\/$/, '') + '/', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(c.ntfyToken
+                ? { Authorization: `Bearer ${c.ntfyToken}` }
+                : {}),
+            },
+            body: JSON.stringify({
+              topic: w.topic,
+              title: `TailWatcher test for ${w.name}: N628TS departed`,
+              message:
+                'at KFDK – Frederick Municipal Airport\n1,800 ft · 105 kt · hdg 270°\nThis is a test alert.',
+              tags: ['airplane', 'test_tube'],
+              click: `https://globe.adsbexchange.com/?icao=${hex}`,
+              actions: [
+                {
+                  action: 'view',
+                  label: 'ADS-B Exchange',
+                  url: `https://globe.adsbexchange.com/?icao=${hex}`,
+                },
+              ],
+            }),
+          })
+          if (res.ok) return { w, ok: true, detail: 'sent' }
+          const detail =
+            res.status === 401 || res.status === 403
+              ? `refused (HTTP ${res.status}): the token has no access to this topic. Provision the publisher with topic "tailwatcher*" in NTFY.`
+              : `HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`
+          return { w, ok: false, detail }
+        } catch (e) {
+          return { w, ok: false, detail: `could not reach NTFY: ${e}` }
+        }
       }),
-    })
-    if (!res.ok) {
-      const detail = (await res.text()).slice(0, 200)
-      throw new Error(
-        res.status === 403 || res.status === 401
-          ? `NTFY refused the token for topic "${c.ntfyTopic}" (HTTP ${res.status}). Provision a publisher for this topic in NTFY and paste its token in Configure.`
-          : `NTFY returned HTTP ${res.status}: ${detail}`,
-      )
-    }
+    )
+
+    const failed = results.filter((r) => !r.ok).length
     return {
       version: '1',
-      title: 'Test Sent',
-      message: `Published to "${c.ntfyTopic}" on ${base}. Check the NTFY app on your phone.`,
-      result: null,
+      title: failed ? `${failed} of ${results.length} Failed` : 'Test Sent',
+      message: failed
+        ? 'Some topics did not accept the test. Details below.'
+        : `Published to ${results.length} topic(s) on ${base}. Check each watcher's NTFY app.`,
+      result: {
+        type: 'group',
+        value: results.map((r) => ({
+          type: 'single',
+          name: `${r.w.name} → ${r.w.topic}`,
+          description: null,
+          value: r.ok ? '✓ sent' : `✗ ${r.detail}`,
+          masked: false,
+          copyable: false,
+          qr: false,
+        })),
+      },
     }
   },
 )

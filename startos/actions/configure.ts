@@ -20,7 +20,8 @@ const aircraftSpec = InputSpec.of({
   }),
   label: Value.text({
     name: 'Nickname',
-    description: 'Optional name shown in the alert, e.g. "Dad\'s Cessna".',
+    description:
+      'Optional name shown in this watcher\'s alerts, e.g. "Dad\'s Cessna".',
     required: false,
     default: null,
     placeholder: "Dad's Cessna",
@@ -28,13 +29,35 @@ const aircraftSpec = InputSpec.of({
   }),
 })
 
-const inputSpec = InputSpec.of({
+const watcherSpec = InputSpec.of({
+  name: Value.text({
+    name: 'Name',
+    description: 'Who this watcher is for, e.g. "Sam" or "Dad".',
+    required: true,
+    default: null,
+    placeholder: 'Dad',
+    maxLength: 40,
+  }),
+  topic: Value.text({
+    name: 'NTFY Topic',
+    description:
+      'Topic this watcher subscribes to in the NTFY app. Start it with "tailwatcher_" so one publisher token (topic tailwatcher*) covers every watcher. In NTFY, give this person\'s user Read Only access to it.',
+    required: true,
+    default: null,
+    placeholder: 'tailwatcher_dad',
+    patterns: [
+      {
+        regex: '^[a-zA-Z0-9_-]{1,64}$',
+        description: 'Letters, numbers, underscores and hyphens only',
+      },
+    ],
+  }),
   aircraft: Value.list(
     List.obj(
       {
         name: 'Aircraft',
         description:
-          'Tail numbers to watch worldwide. You get an alert when one takes off, or first shows up airborne after being off the radar for 20+ minutes.',
+          'Tail numbers this watcher gets alerts for. Several watchers can follow the same aircraft.',
         default: [],
         maxLength: 50,
       },
@@ -45,34 +68,6 @@ const inputSpec = InputSpec.of({
       },
     ),
   ),
-  ntfyTopic: Value.text({
-    name: 'NTFY Topic',
-    description:
-      'The topic to publish to. Subscribe to the same topic in the NTFY app on your phone.',
-    required: true,
-    default: 'tailwatcher',
-    patterns: [
-      {
-        regex: '^[a-zA-Z0-9_-]{1,64}$',
-        description: 'Letters, numbers, underscores and hyphens only',
-      },
-    ],
-  }),
-  ntfyToken: Value.text({
-    name: 'NTFY Access Token',
-    description:
-      'In NTFY, run Actions → Provision Publisher with Publisher ID "tailwatcher" and the topic above, then paste the token (tk_…) here. Leave blank only if the topic allows anonymous publishing.',
-    required: false,
-    default: null,
-    masked: true,
-    placeholder: 'tk_…',
-    patterns: [
-      {
-        regex: '^tk_[A-Za-z0-9]+$',
-        description: 'NTFY tokens start with tk_',
-      },
-    ],
-  }),
   notifyLanding: Value.toggle({
     name: 'Also Alert on Landing',
     description:
@@ -90,6 +85,40 @@ const inputSpec = InputSpec.of({
       high: 'High',
       max: 'Max',
     },
+  }),
+})
+
+const inputSpec = InputSpec.of({
+  watchers: Value.list(
+    List.obj(
+      {
+        name: 'Watchers',
+        description:
+          'Each watcher has their own NTFY topic and aircraft list. You get an alert when one of your aircraft takes off, or first shows up airborne after being off the radar for 20+ minutes.',
+        default: [],
+        maxLength: 20,
+      },
+      {
+        spec: watcherSpec,
+        displayAs: '{{name}} → {{topic}}',
+        uniqueBy: 'topic',
+      },
+    ),
+  ),
+  ntfyToken: Value.text({
+    name: 'NTFY Access Token',
+    description:
+      'In NTFY, run Actions → Provision Publisher with Publisher ID "tailwatcher" and Topic "tailwatcher*", then paste the token (tk_…) here. The wildcard lets this one token publish to every watcher\'s topic.',
+    required: false,
+    default: null,
+    masked: true,
+    placeholder: 'tk_…',
+    patterns: [
+      {
+        regex: '^tk_[A-Za-z0-9]+$',
+        description: 'NTFY tokens start with tk_',
+      },
+    ],
   }),
   mapLinks: Value.select({
     name: 'Map Buttons',
@@ -115,7 +144,7 @@ const inputSpec = InputSpec.of({
   pollSeconds: Value.number({
     name: 'Check Every',
     description:
-      'How often to check each aircraft. Lower is faster to alert but makes more requests to the free API.',
+      'How often to check each aircraft. Each tail is checked once no matter how many watchers follow it. Lower is faster to alert but makes more requests to the free API.',
     required: true,
     default: 60,
     min: 15,
@@ -131,7 +160,7 @@ export const configure = sdk.Action.withInput(
   async () => ({
     name: 'Configure',
     description:
-      'Choose the tail numbers to watch and where alerts go. TailWatcher restarts to apply changes.',
+      'Set up watchers (who gets alerts, on which NTFY topic, for which tail numbers). TailWatcher restarts to apply changes.',
     warning: null,
     allowedStatuses: 'any',
     group: null,
@@ -146,23 +175,32 @@ export const configure = sdk.Action.withInput(
     return {
       ...c,
       ntfyToken: c.ntfyToken || null,
-      aircraft: c.aircraft.map((a) => ({ tail: a.tail, label: a.label || null })),
+      watchers: c.watchers.map((w) => ({
+        ...w,
+        aircraft: w.aircraft.map((a) => ({
+          tail: a.tail,
+          label: a.label || null,
+        })),
+      })),
     }
   },
 
   async ({ effects, input }) => {
     await configJson.write(effects, {
-      aircraft: input.aircraft.map((a) => ({
-        tail: a.tail.toUpperCase().replace(/[^A-Z0-9]/g, ''),
-        label: a.label?.trim() ?? '',
+      watchers: input.watchers.map((w) => ({
+        name: w.name.trim(),
+        topic: w.topic,
+        aircraft: w.aircraft.map((a) => ({
+          tail: a.tail.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+          label: a.label?.trim() ?? '',
+        })),
+        notifyLanding: w.notifyLanding,
+        priority: w.priority,
       })),
-      ntfyTopic: input.ntfyTopic,
       ntfyToken: input.ntfyToken ?? '',
       pollSeconds: input.pollSeconds,
       dataSource: input.dataSource,
       mapLinks: input.mapLinks,
-      notifyLanding: input.notifyLanding,
-      priority: input.priority,
     })
     return null
   },

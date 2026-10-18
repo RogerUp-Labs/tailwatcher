@@ -6,8 +6,10 @@ export const main = sdk.setupMain(async ({ effects }) => {
   // .const() restarts the service when the config or NTFY's address changes.
   const config = await configJson.read().const(effects)
   const ntfy = (await ntfyUrl(effects).const()) ?? ntfyFallbackUrl
+  const watchers = config?.watchers ?? []
+  const tails = new Set(watchers.flatMap((w) => w.aircraft.map((a) => a.tail)))
   console.info(
-    `Starting TailWatcher: ${config?.aircraft.length ?? 0} aircraft, NTFY at ${ntfy}`,
+    `Starting TailWatcher: ${tails.size} aircraft for ${watchers.length} watcher(s), NTFY at ${ntfy}`,
   )
 
   const subcontainer = await sdk.SubContainer.of(

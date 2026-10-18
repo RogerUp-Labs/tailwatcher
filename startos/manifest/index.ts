@@ -14,7 +14,7 @@ export const manifest = setupManifest({
   images: {
     main: {
       // Built locally by `make` (docker build), so no buildx is needed.
-      source: { dockerTag: 'start9/tailwatcher/main:0.1.0' },
+      source: { dockerTag: 'start9/tailwatcher/main:0.2.0' },
       arch: ['x86_64', 'aarch64'],
     },
   },

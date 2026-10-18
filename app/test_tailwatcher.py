@@ -57,11 +57,13 @@ class MessageTest(unittest.TestCase):
         self.airports = tw.Airports("/nonexistent")
         self.airports.rows = [("KFDK", "Frederick Municipal Airport", 39.4176, -77.3743)]
         self.cfg = tw.load_config("/nonexistent")
-        self.cfg.update(ntfy_topic="planes", map_links="both")
+        self.cfg.update(map_links="both")
+        self.watcher = {"name": "Sam", "topic": "tailwatcher_sam", "aircraft": [],
+                        "notify_landing": False, "priority": "high"}
 
     def test_message_fields(self):
         fix = ac(1800, lat=39.42, lon=-77.38, gs=105, track=270, t="C172", flight="N12345 ")
-        m = tw.build_message(self.cfg, {"tail": "N12345", "label": "Dad"}, fix, "departed", self.airports)
+        m = tw.build_message(self.cfg, self.watcher, "N12345", "Dad", fix, "departed", self.airports)
         self.assertEqual(m["title"], "N12345 (Dad) departed")
         self.assertIn("KFDK", m["message"])
         self.assertIn("1,800 ft · 105 kt · hdg 270°", m["message"])
@@ -69,15 +71,53 @@ class MessageTest(unittest.TestCase):
         self.assertNotIn("N12345", m["message"])  # callsign == tail is not repeated
         self.assertEqual(m["click"], "https://globe.adsbexchange.com/?icao=a1b2c3")
         self.assertEqual([a["label"] for a in m["actions"]], ["ADS-B Exchange", "adsb.lol"])
+        self.assertEqual(m["topic"], "tailwatcher_sam")
+        self.assertEqual(m["priority"], 4)
 
     def test_no_airport_at_cruise(self):
         fix = ac(34000, lat=39.42, lon=-77.38)
-        m = tw.build_message(self.cfg, {"tail": "N12345", "label": ""}, fix, "airborne", self.airports)
+        m = tw.build_message(self.cfg, self.watcher, "N12345", "", fix, "airborne", self.airports)
         self.assertNotIn("KFDK", m["message"])
         self.assertTrue(m["message"].startswith("34,000 ft"))
 
     def test_tail_normalization(self):
         self.assertEqual(tw.normalize_tail(" n-123ab "), "N123AB")
+
+
+class ConfigTest(unittest.TestCase):
+    def write(self, data):
+        import json, tempfile
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(data, f)
+        f.close()
+        return f.name
+
+    def test_legacy_config_becomes_one_watcher(self):
+        cfg = tw.load_config(self.write({
+            "aircraft": [{"tail": "n-12345", "label": "Dad"}],
+            "ntfyTopic": "tailwatcher", "ntfyToken": "tk_x",
+            "notifyLanding": True, "priority": "high",
+        }))
+        self.assertEqual(len(cfg["watchers"]), 1)
+        w = cfg["watchers"][0]
+        self.assertEqual((w["name"], w["topic"], w["priority"]), ("Me", "tailwatcher", "high"))
+        self.assertTrue(w["notify_landing"])
+        self.assertEqual(w["aircraft"], [{"tail": "N12345", "label": "Dad"}])
+        self.assertEqual(cfg["ntfy_token"], "tk_x")
+
+    def test_shared_tail_polled_once_for_both_watchers(self):
+        cfg = tw.load_config(self.write({"watchers": [
+            {"name": "Sam", "topic": "tailwatcher_sam",
+             "aircraft": [{"tail": "N12345", "label": ""}, {"tail": "N628TS", "label": ""}]},
+            {"name": "Dad", "topic": "tailwatcher_dad",
+             "aircraft": [{"tail": "N12345", "label": "Sam's plane"}]},
+            {"name": "Empty", "topic": "tailwatcher_x", "aircraft": []},
+        ]}))
+        self.assertEqual([w["name"] for w in cfg["watchers"]], ["Sam", "Dad"])  # empty dropped
+        subs = tw.subscriptions(cfg)
+        self.assertEqual(list(subs), ["N12345", "N628TS"])
+        self.assertEqual([(w["name"], label) for w, label in subs["N12345"]],
+                         [("Sam", ""), ("Dad", "Sam's plane")])
 
 
 if __name__ == "__main__":
