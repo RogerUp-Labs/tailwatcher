@@ -13,7 +13,8 @@ Two ways to say which plane it is:
   departure time, and re-checks before departure in case the plane changes.
 
 Trips live in trips.json (not config.json, so the Configure form never
-touches them) and are removed a few hours after departure.
+touches them) and are removed a few hours after departure. "trips" numbers
+them soonest first; "change 2 …" and "cancel 2" act on that numbering.
 """
 
 import datetime
@@ -39,8 +40,8 @@ TRIPS_LOCK = threading.Lock()
 ADB_HOST = "aerodatabox.p.rapidapi.com"
 ADSBDB_ROUTE_URL = "https://api.adsbdb.com/v0/callsign/{cs}"
 
-# With an AeroDataBox key, re-check the assignment this many hours before
-# departure (plus once when the trip is added). ~2 calls each.
+# With an AeroDataBox key: full checks (2 requests) this many hours before
+# departure; before that, light checks (1 request) weekly, then daily. See check_level().
 CHECKPOINT_HOURS = [24, 6, 2, 0.75]
 APPROACH_MIN = 8        # added to distance/groundspeed for the approach and landing
 TIGHT_MIN = 45          # warn when the inbound plane lands this close to your departure
@@ -66,41 +67,40 @@ USAGE = (
 # --------------------------------------------------------------- parsing
 
 
-def parse_inbound(text, now, tz_name, airports):
-    """Parse "UA1234 [N38473|UA567] [dep] [4:30pm] [tomorrow|10/20] [from IAD]".
+def scan(words, now, tz_name, airports):
+    """Read the words of an "inbound" or "change" message.
 
-    Returns a new trip dict, or an error string to send back.
+    Returns a dict with: idents [(kind, shown, key, marked_as_plane)] in order,
+    day / explicit_day (a date), clock ((h, m) or None), airport (ICAO or None),
+    or an error string.
     """
     tz = commands.zone(tz_name)
-    words = commands.merge_flight_words((text or "").split(), 0)
-    if not words:
-        return USAGE
-    flight = flights.parse_flight(words[0])
-    if not flight:
-        return f"❌ \"{words[0]}\" doesn't look like a flight number.\n\n{USAGE}"
-
     today = datetime.datetime.fromtimestamp(now, tz).date()
-    day, clock, inbound, dep_airport, explicit_day = today, None, None, None, False
-    i = 1
+    out = {"idents": [], "day": today, "explicit_day": False, "clock": None, "airport": None}
+    plane_next = False
+    i = 0
     while i < len(words):
         w, low = words[i], words[i].lower()
         nxt = words[i + 1] if i + 1 < len(words) else ""
-        if low in ("dep", "departs", "departing", "leaves", "at", "on"):
+        if low in ("dep", "departs", "departing", "leaves", "at", "on", "to", "now"):
             i += 1
             continue
+        if low in ("plane", "inbound", "via"):
+            plane_next, i = True, i + 1
+            continue
         if low == "from" and nxt:
-            dep_airport, i = resolve_airport(nxt, airports), i + 2
-            if not dep_airport:
+            out["airport"], i = resolve_airport(nxt, airports), i + 2
+            if not out["airport"]:
                 return f"❌ I don't know an airport \"{nxt}\"."
             continue
         if low in ("today", "tomorrow"):
-            day, explicit_day = today + datetime.timedelta(days=low == "tomorrow"), True
-            i += 1
+            out["day"] = today + datetime.timedelta(days=low == "tomorrow")
+            out["explicit_day"], i = True, i + 1
             continue
         m = DATE_RE.match(w)
         if m:
-            day, explicit_day = month_day(today, int(m.group(1)), int(m.group(2))), True
-            if day is None:
+            out["day"], out["explicit_day"] = month_day(today, int(m.group(1)), int(m.group(2))), True
+            if out["day"] is None:
                 return f"❌ \"{w}\" isn't a date."
             i += 1
             continue
@@ -108,34 +108,106 @@ def parse_inbound(text, now, tz_name, airports):
             w, i = w + nxt, i + 1
         m = TIME_RE.match(w)
         if m and (m.group(2) or m.group(3)):  # "4:30", "4pm"; a bare "567" is not a time
-            clock = to_24h(int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower())
-            if clock is None:
+            out["clock"] = to_24h(int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").lower())
+            if out["clock"] is None:
                 return f"❌ \"{w}\" isn't a time."
             i += 1
             continue
         merged = commands.merge_flight_words(words, i)[i]
         entry = commands.classify(merged)
-        if not entry or inbound:
-            return f"🤔 I didn't understand \"{w}\".\n\n{USAGE}"
-        kind, shown, key = entry
-        if kind == "tail" and not commands.looks_like_tail(merged):
-            return f"🤔 I didn't understand \"{w}\".\n\n{USAGE}"  # "banana" isn't a tail
-        inbound = {"tail": shown if kind == "tail" else None,
-                   "flight": shown if kind == "flight" else None,
-                   "callsign": key if kind == "flight" else None}
-        if merged != w:
-            i += 1  # "UA 567" took two words
-        i += 1
+        if not entry or (entry[0] == "tail" and not commands.looks_like_tail(merged)):
+            return f"🤔 I didn't understand \"{w}\"."  # "banana" isn't a tail
+        out["idents"].append((*entry, plane_next))
+        plane_next = False
+        i += 2 if merged != w else 1  # "UA 567" took two words
+    return out
 
-    dep_time = None
-    if clock:
-        local = datetime.datetime.combine(day, datetime.time(*clock), tz)
-        if not explicit_day and local.timestamp() < now - 3600:
-            local += datetime.timedelta(days=1)  # "dep 9am" said in the evening means tomorrow
-            day = local.date()
-        dep_time = local.timestamp()
 
-    return new_trip(flight, day.isoformat(), dep_time, dep_airport, inbound, now)
+def as_inbound(kind, shown, key):
+    return {"tail": shown if kind == "tail" else None,
+            "flight": shown if kind == "flight" else None,
+            "callsign": key if kind == "flight" else None}
+
+
+def departure_time(day, clock, explicit_day, now, tz_name):
+    """Unix time of `clock` on `day`; "dep 9am" said in the evening means tomorrow."""
+    local = datetime.datetime.combine(day, datetime.time(*clock), commands.zone(tz_name))
+    if not explicit_day and local.timestamp() < now - 3600:
+        local += datetime.timedelta(days=1)
+    return local.timestamp(), local.date()
+
+
+def parse_inbound(text, now, tz_name, airports):
+    """Parse "UA1234 [N38473|UA567] [dep] [4:30pm] [tomorrow|10/20] [from IAD]".
+
+    Returns a new trip dict, or an error string to send back.
+    """
+    words = commands.merge_flight_words((text or "").split(), 0)
+    if not words:
+        return USAGE
+    flight = flights.parse_flight(words[0])
+    if not flight:
+        return f"❌ \"{words[0]}\" doesn't look like a flight number.\n\n{USAGE}"
+    f = scan(words[1:], now, tz_name, airports)
+    if isinstance(f, str):
+        return f"{f}\n\n{USAGE}"
+    if len(f["idents"]) > 1:
+        return f"🤔 I can only follow one plane per trip.\n\n{USAGE}"
+    day, dep_time = f["day"], None
+    if f["clock"]:
+        dep_time, day = departure_time(day, f["clock"], f["explicit_day"], now, tz_name)
+    inbound = as_inbound(*f["idents"][0][:3]) if f["idents"] else None
+    return new_trip(flight, day.isoformat(), dep_time, f["airport"], inbound, now)
+
+
+def apply_change(trip, text, now, tz_name, airports):
+    """Apply a "change 1 …" message to a trip.
+
+    A tail number (or "plane UA567") sets the plane flying in; any other flight
+    number renumbers your flight; a time, date or "from IAD" updates those.
+    Returns (error or None, needs_lookup) where needs_lookup means the flight
+    or date changed and AeroDataBox should look it up again.
+    """
+    f = scan((text or "").split(), now, tz_name, airports)
+    if isinstance(f, str):
+        return f, False
+    if not (f["idents"] or f["clock"] or f["explicit_day"] or f["airport"]):
+        return "🤔 What should change? e.g. \"change 1 AA5678\", \"change 1 dep 5:10pm\", " \
+               "\"change 1 N38473\" or \"change 1 11/15\".", False
+    renumber = plane = None
+    for kind, shown, key, marked in f["idents"]:
+        if kind == "tail" or marked:
+            plane = as_inbound(kind, shown, key)
+        else:
+            renumber = flights.parse_flight(shown)
+    needs_lookup = False
+    if renumber and renumber[0] != trip["flight"]:
+        trip["flight"], trip["callsign"] = renumber
+        needs_lookup = True
+    if f["explicit_day"] and f["day"].isoformat() != trip["date"]:
+        trip["date"] = f["day"].isoformat()
+        needs_lookup = True
+    if needs_lookup:
+        # Keep your departure time (AeroDataBox overwrites it if it knows
+        # better); a new date keeps the same clock time on that day.
+        if trip.get("dep_time") and f["explicit_day"] and not f["clock"]:
+            old = datetime.datetime.fromtimestamp(trip["dep_time"], commands.zone(tz_name))
+            trip["dep_time"], _ = departure_time(f["day"], (old.hour, old.minute), True, now, tz_name)
+        trip.update(seen=False, missing=False, replacement=None,
+                    checkpoints=list(CHECKPOINT_HOURS), last_check=None)
+        if not trip.get("plane_locked"):
+            trip["inbound"] = None
+    if f["airport"]:
+        trip["dep_airport"] = f["airport"]
+    if f["clock"]:
+        day = datetime.date.fromisoformat(trip["date"])
+        trip["dep_time"], day = departure_time(day, f["clock"], True, now, tz_name)
+    if plane:
+        trip["inbound"], trip["plane_locked"] = plane, True
+    if plane or needs_lookup:
+        trip.update(departed=False, landed=False, eta_sent=None, tight=False, late=False,
+                    leg_note=None, near_low=None)
+    return None, needs_lookup
 
 
 def new_trip(flight, date, dep_time, dep_airport, inbound, now):
@@ -144,7 +216,11 @@ def new_trip(flight, date, dep_time, dep_airport, inbound, now):
         "dep_time": dep_time, "dep_airport": dep_airport,
         "inbound": inbound, "source": "manual" if inbound else "aerodatabox",
         "checkpoints": list(CHECKPOINT_HOURS), "last_check": None,
-        "created": now,
+        "created": now, "plane_locked": bool(inbound),
+        # AeroDataBox bookkeeping: seen = it has listed this flight before,
+        # missing = it no longer does (renumbered or cancelled?).
+        "seen": False, "missing": False, "replacement": None,
+        "arr_airport": None, "sched_dep_local": None,
         # progress
         "departed": False, "landed": False, "eta_sent": None,
         "tight": False, "late": False, "leg_note": None, "near_low": None, "routes": {},
@@ -239,9 +315,61 @@ def cancel(topic, ident, path=None):
         return len(trips) - len(keep)
 
 
+def sort_key(t):
+    return t.get("dep_time") or date_end(t)
+
+
 def for_topic(topic, path=None):
-    return sorted((t for t in load(path) if t["topic"] == topic),
-                  key=lambda t: t.get("dep_time") or t["created"])
+    """A watcher's trips, soonest first. "trips" numbers them in this order."""
+    return sorted((t for t in load(path) if t["topic"] == topic), key=sort_key)
+
+
+def select(mine, selector, now, tz_name):
+    """Find a trip in a watcher's list by number ("2") or flight ("AA1234", "AA1234 11/14").
+
+    Returns (trip, rest_of_text) or (None, error).
+    """
+    words = commands.merge_flight_words((selector or "").split(), 0)
+    if not words:
+        return None, "Which trip? Send \"trips\" to see them numbered."
+    if words[0].isdigit():
+        n = int(words[0])
+        if not 1 <= n <= len(mine):
+            return None, f"🤷 There's no trip {n}. Send \"trips\" to see them numbered."
+        return mine[n - 1], " ".join(words[1:])
+    flight = flights.parse_flight(words[0])
+    if not flight:
+        return None, f"🤷 \"{words[0]}\" isn't a trip number or flight number."
+    matches = [t for t in mine if t["flight"] == flight[0]]
+    rest = words[1:]
+    if len(matches) > 1 and rest and DATE_RE.match(rest[0]):
+        today = datetime.datetime.fromtimestamp(now, commands.zone(tz_name)).date()
+        day = month_day(today, *map(int, rest[0].split("/")))
+        matches = [t for t in matches if day and t["date"] == day.isoformat()]
+        rest = rest[1:]
+    if not matches:
+        return None, f"🤷 No trip for {flight[0]}."
+    if len(matches) > 1:
+        return None, (f"You have {len(matches)} {flight[0]} trips; use its number from \"trips\" "
+                      "or add the date (e.g. 11/14).")
+    return matches[0], " ".join(rest)
+
+
+def modify(topic, selector, fn, now, tz_name, path=None):
+    """Find one of a watcher's trips and change or delete it under the lock.
+
+    fn(trip, rest_text) returns (reply, keep): keep=False deletes the trip.
+    """
+    with TRIPS_LOCK:
+        all_trips = load(path)
+        mine = sorted((t for t in all_trips if t["topic"] == topic), key=sort_key)
+        trip, rest = select(mine, selector, now, tz_name)
+        if trip is None:
+            return rest
+        reply, keep = fn(trip, rest)
+        others = [t for t in all_trips if t is not trip]
+        save(others + [trip] if keep else others, path)
+        return reply
 
 
 # ------------------------------------------------------------ formatting
@@ -273,6 +401,11 @@ def describe(trip, tz_name, intro=True):
     if trip.get("dep_airport"):
         head += f" from {trip['dep_airport']}"
     lines = [head]
+    if trip.get("missing"):
+        lines.append("⚠️ No longer listed by AeroDataBox (renumbered or cancelled?)")
+        rep = trip.get("replacement")
+        if rep:
+            lines.append(f"Possible replacement: {rep['flight']}, departs {fmt_time(rep['dep_time'], tz_name)}")
     if inb.get("tail") or inb.get("flight"):
         bits = [f"Your plane: {inb.get('tail') or inb.get('flight')}"]
         if inb.get("tail") and inb.get("flight"):
@@ -302,7 +435,9 @@ def describe(trip, tz_name, intro=True):
 def describe_all(trips, tz_name):
     if not trips:
         return "No trips. Send \"inbound UA1234 N38473 dep 4:30pm\" to track the plane flying in for your flight."
-    return "\n\n".join(describe(t, tz_name, intro=False) for t in trips)
+    parts = [f"{n}. " + describe(t, tz_name, intro=False) for n, t in enumerate(trips, 1)]
+    return "\n\n".join(parts) + ("\n\nChange one with \"change 1 …\" (new flight number, plane, "
+                                  "time, date or airport) or remove it with \"cancel 1\".")
 
 
 # ------------------------------------------------------------ AeroDataBox
@@ -370,11 +505,14 @@ def pick_inbound(plane_legs, dep_airport, dep_time, flight):
     return best
 
 
-def resolve(trip, key, ua, sleep=time.sleep, get=adb_get):
-    """Fill in the trip from AeroDataBox. Returns a list of change notes.
+def resolve(trip, key, ua, full=True, sleep=time.sleep, get=adb_get):
+    """Refresh the trip from AeroDataBox. Returns a list of change notes.
 
-    Raises AdbError if AeroDataBox can't be used; leaves the trip unchanged
-    when it has no data for the flight yet.
+    A light check (full=False) costs one request: is the flight still listed,
+    and when does it leave? A full check also looks up the assigned plane's
+    day to find its inbound leg (a second request); that's only worth doing in
+    the last day, when airlines have actually assigned a plane.
+    Raises AdbError if AeroDataBox can't be used.
     """
     notes = []
     common = {"withAircraftImage": "false", "withLocation": "false"}
@@ -382,9 +520,18 @@ def resolve(trip, key, ua, sleep=time.sleep, get=adb_get):
                {**common, "dateLocalRole": "Departure"}, ua)
     leg = pick_leg(legs if isinstance(legs, list) else [], trip.get("dep_airport"))
     if not leg:
+        if trip.get("seen") and not trip.get("missing"):
+            trip["missing"] = True
+            notes.append(("missing", None, None))
         return notes
+    if trip.get("missing"):
+        trip.update(missing=False, replacement=None)
+        notes.append(("back", None, None))
+    trip["seen"] = True
     dep = leg.get("departure") or {}
     trip["dep_airport"] = (dep.get("airport") or {}).get("icao") or trip.get("dep_airport")
+    trip["arr_airport"] = ((leg.get("arrival") or {}).get("airport") or {}).get("icao") or trip.get("arr_airport")
+    trip["sched_dep_local"] = (dep.get("scheduledTime") or {}).get("local") or trip.get("sched_dep_local")
     new_dep = adb_time(dep, "revisedTime", "predictedTime", "scheduledTime")
     if new_dep:
         old = trip.get("dep_time")
@@ -392,8 +539,8 @@ def resolve(trip, key, ua, sleep=time.sleep, get=adb_get):
             notes.append(("dep_change", old, new_dep))
         trip["dep_time"] = new_dep
     reg = commands.normalize_tail((leg.get("aircraft") or {}).get("reg") or "")
-    if not reg:
-        return notes
+    if not full or not reg or trip.get("plane_locked"):
+        return notes  # far out, unassigned, or you named the plane yourself
     old_tail = (trip.get("inbound") or {}).get("tail")
     sleep(1.1)  # free tier allows 1 request per second
     plane_legs = get(key, f"/flights/reg/{reg}/{trip['date']}", {**common, "dateLocalRole": "Both"}, ua)
@@ -414,24 +561,66 @@ def resolve(trip, key, ua, sleep=time.sleep, get=adb_get):
     return notes
 
 
-def due_for_check(trip, now):
-    """Should this AeroDataBox trip be re-checked now? Consumes passed checkpoints."""
+def find_replacement(trip, key, ua, get=adb_get):
+    """After a flight vanishes, look for the airline's new number for it: a
+    departure from the same airport to the same destination, same airline,
+    within 3 hours of the old time. One request. Returns a dict or None."""
+    local = trip.get("sched_dep_local") or ""
+    m = re.match(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})", local)
+    if not (m and trip.get("dep_airport") and trip.get("arr_airport")):
+        return None
+    t = datetime.datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}")
+    fmt = "%Y-%m-%dT%H:%M"
+    board = get(key, f"/flights/airports/icao/{trip['dep_airport']}/"
+                     f"{(t - datetime.timedelta(hours=3)).strftime(fmt)}/"
+                     f"{(t + datetime.timedelta(hours=3)).strftime(fmt)}",
+                {"direction": "Departure", "withLeg": "true", "withCancelled": "false",
+                 "withCodeshared": "false", "withCargo": "false", "withPrivate": "false",
+                 "withLocation": "false"}, ua)
+    departures = board.get("departures") if isinstance(board, dict) else None
+    airline = (trip.get("callsign") or "")[:3]
+    best, best_gap = None, None
+    for f in departures or []:
+        number = flights.parse_flight(f.get("number") or "")
+        if not number or number[0] == trip["flight"] or number[1][:3] != airline:
+            continue
+        if ((f.get("arrival") or {}).get("airport") or {}).get("icao") != trip["arr_airport"]:
+            continue
+        when = adb_time(f.get("departure") or f.get("movement"), "scheduledTime")
+        if when is None:
+            continue
+        gap = abs(when - (trip.get("dep_time") or when))
+        if best_gap is None or gap < best_gap:
+            best, best_gap = {"flight": number[0], "dep_time": when}, gap
+    return best
+
+
+def check_level(trip, now):
+    """What AeroDataBox check is due: None, "light" or "full".
+
+    More than 2 weeks out: a light check weekly (is the flight still listed?).
+    From then until a day out: a light check daily. In the last day: full
+    checks about 24h, 6h, 2h and 45 min before departure (the plane is
+    usually only assigned then). Consumes the checkpoints it reports.
+    """
     if trip.get("source") != "aerodatabox" or trip.get("landed"):
-        return False
-    if not trip.get("dep_time"):
-        # No schedule yet: once a day while the trip is more than 2 days off,
-        # every 6 hours after that.
-        far = date_end(trip) - now > 3 * 86400
-        interval = 24 * 3600 if far else 6 * 3600
-        return not trip.get("last_check") or now - trip["last_check"] > interval
-    passed = [h for h in trip.get("checkpoints") or [] if now >= trip["dep_time"] - h * 3600]
-    if not passed:
-        return False
-    trip["checkpoints"] = [h for h in trip["checkpoints"] if h not in passed]
-    return True
+        return None
+    dep = trip.get("dep_time")
+    if dep and now >= dep - 24 * 3600:
+        passed = [h for h in trip.get("checkpoints") or [] if now >= dep - h * 3600]
+        if not passed:
+            return None
+        trip["checkpoints"] = [h for h in trip["checkpoints"] if h not in passed]
+        return "full"
+    ahead = (dep or date_end(trip)) - now
+    interval = 7 * 86400 if ahead > 14 * 86400 else 86400
+    last = trip.get("last_check")
+    return "light" if not last or now - last >= interval else None
 
 
-def change_messages(trip, notes, tz_name):
+def change_messages(trip, notes, tz_name, number=None):
+    """Messages for resolve() notes. `number` is the trip's place in "trips"."""
+    ref = str(number) if number else trip["flight"]
     out = []
     for kind, old, new in notes:
         if kind == "plane_change":
@@ -441,10 +630,38 @@ def change_messages(trip, notes, tz_name):
             later = "later" if new > old else "earlier"
             out.append((f"🕓 {trip['flight']} time change",
                         f"Now departs {fmt_time(new, tz_name)} ({later} than {fmt_time(old, tz_name)}).", 4))
+        elif kind == "missing":
+            text = (f"{trip['flight']} on {fmt_day(trip, tz_name)} is no longer listed. "
+                    "The airline may have renumbered or cancelled it.")
+            rep = trip.get("replacement")
+            if rep:
+                text += (f"\nLooks like it's now {rep['flight']}, departing {fmt_time(rep['dep_time'], tz_name)}"
+                         f" to {trip.get('arr_airport')}. Reply \"change {ref} {rep['flight']}\" to switch.")
+            else:
+                text += (f"\nWhen you know the new flight number, reply \"change {ref} AA5678\" "
+                         "(with the new number), or \"cancel " + ref + "\".")
+            out.append((f"⚠️ {trip['flight']} has disappeared", text, 4))
+        elif kind == "back":
+            out.append((f"✅ {trip['flight']} is listed again",
+                        "AeroDataBox shows your flight again; I'll keep tracking it.", 3))
     return out
 
 
 # ------------------------------------------------------------ live tracking
+
+
+LIVE_BEFORE_H = 24  # start following the plane this long before departure
+
+
+def is_live(trip, now):
+    """Follow the plane on ADS-B only in the last day: a month out, the same
+    tail is flying other people's trips."""
+    if trip.get("dep_time"):
+        return now >= trip["dep_time"] - LIVE_BEFORE_H * 3600
+    d = datetime.date.fromisoformat(trip["date"])
+    earliest = datetime.datetime.combine(d, datetime.time(0), datetime.timezone.utc) \
+        - datetime.timedelta(hours=14)  # the date starts first at UTC+14
+    return now >= earliest.timestamp() - 12 * 3600
 
 
 def inbound_key(trip):

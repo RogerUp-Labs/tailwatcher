@@ -33,7 +33,9 @@ Type in your topic in the NTFY app (the message bar at the bottom) and TailWatch
 | `info N12345` (or `who N12345`) | Look up any aircraft: what it is, who owns it, where it is now, and a photo |
 | `info UA1234` | The same for whichever plane is flying that flight right now |
 | `inbound UA1234 N38473 dep 4:30pm` | Follow the plane flying in for your flight (see **Where's my plane?** below) |
-| `trips` / `cancel UA1234` | Show your trips / stop tracking one |
+| `trips` | Your trips, numbered, soonest first |
+| `change 1 AA5678` · `change 1 dep 5:10pm` · `change 1 N38473` · `change 1 11/15` · `change 1 from DFW` | Update trip 1: new flight number, departure time, plane, date or airport |
+| `cancel 1` | Stop tracking trip 1 (or `cancel AA1234`) |
 | `help` | Show the commands |
 
 A plane you add is checked right away; if it's already flying, you get the "airborne" alert within seconds. Sending an entry you already watch with a new expiry (`UA1234 for 3d`) updates it. When an entry expires, TailWatcher removes it and posts "⌛ Stopped watching UA1234 (expired)". "until" uses the **Time Zone** set in Configure. Changes show up in **Configure** too. Each person can only change their own list, since they can only post to their own topic. Turn this off with **Text Commands** in Configure.
@@ -80,7 +82,16 @@ Before a flight, the plane you'll fly on is usually still finishing its previous
 
 Your flight comes first, then the plane, your departure time, and optionally `tomorrow` or a date (`10/20`) and your airport (`from IAD`). Without `from`, TailWatcher works out your airport from where the plane is flying.
 
-**With an AeroDataBox key** (free; see Configure), `inbound UA1234` is enough (add `tomorrow` or a date for later trips). TailWatcher looks up the plane assigned to your flight, the flight it arrives on and your departure time, re-checks about 24 h, 6 h, 2 h and 45 min before departure, and tells you if the plane or your departure time changes. Each check uses about 2 of the free plan's monthly requests.
+**With an AeroDataBox key** (free; see Configure), `inbound UA1234` is enough. Add `tomorrow` or a date for later trips, e.g. `inbound AA1234 11/14`, and `from IAD` if the flight number makes more than one stop. TailWatcher looks up your departure time, then the plane assigned to your flight and the flight it arrives on once the airline assigns one, and tells you if the plane or your departure time changes.
+
+How often it checks, to stay well inside the free plan's 400 requests a month:
+- **More than 2 weeks out:** once a week (1 request): is the flight still listed, and when does it leave?
+- **2 weeks to 1 day out:** once a day (1 request).
+- **The last day:** about 24 h, 6 h, 2 h and 45 min before departure (2 requests each), to find the assigned plane and its inbound flight.
+
+A trip added a month ahead uses about 20 requests in all.
+
+**If the airline renumbers or cancels your flight**, AeroDataBox stops listing it. TailWatcher notices on its next check and tells you. It also searches your airport's departures around the original time for the same airline to the same destination. If it finds a likely match, the message says e.g. "Looks like it's now AA5678, departing 4:10pm to KDFW. Reply \"change 2 AA5678\" to switch." It never switches on its own, so it can't end up following the wrong flight.
 
 Arrival estimates come from the plane's live position and speed, so treat them as a heads-up rather than the airline's official time. Times are shown in the time zone set in Configure. Trips clear themselves a few hours after departure.
 

@@ -34,7 +34,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-USER_AGENT = "TailWatcher/0.6 (+https://github.com/homebrew-gh/tailwatcher)"
+USER_AGENT = "TailWatcher/0.7 (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
     "adsb.lol": {"tail": "https://api.adsb.lol/v2/reg/{key}",
@@ -419,11 +419,9 @@ def run():
                 return (trips.USAGE + "\n\nOr add a free AeroDataBox key in Configure and I'll look "
                         "the plane up myself.")
             try:
-                trips.resolve(trip, cfg["adb_key"], USER_AGENT)
+                adb_refresh(trip, now)
             except trips.AdbError as e:
                 return f"❌ {e}.\n\n{trips.USAGE}"
-            trip["last_check"] = now
-            trips.due_for_check(trip, now)  # checkpoints already behind us don't count
             if not trip.get("dep_time") and not trip["inbound"]:
                 trips.add(trip)
                 return (f"🤷 AeroDataBox has nothing for {trip['flight']} on {trip['date']} yet. "
@@ -432,18 +430,45 @@ def run():
         wake.set()  # poll the plane right away
         return trips.describe(trip, cfg["time_zone"])
 
+    def adb_refresh(trip, now):
+        """Look a trip up on AeroDataBox right away (when added or changed): a
+        full check if it's within a day, otherwise just the schedule."""
+        soon = (trip.get("dep_time") or trips.date_end(trip)) - now < 36 * 3600
+        trips.resolve(trip, cfg["adb_key"], USER_AGENT, full=soon)
+        trip["last_check"] = now
+        trips.check_level(trip, now)  # checkpoints already behind us don't count
+
+    def on_change(trip, rest):
+        now = time.time()
+        err, needs_lookup = trips.apply_change(trip, rest, now, cfg["time_zone"], airports)
+        if err:
+            return err, True
+        note = ""
+        if needs_lookup and cfg["adb_key"]:
+            try:
+                adb_refresh(trip, now)
+            except trips.AdbError as e:
+                note = f"\n(Couldn't check AeroDataBox: {e}.)"
+        wake.set()
+        return "✏️ Updated.\n" + trips.describe(trip, cfg["time_zone"], intro=False) + note, True
+
+    def on_cancel(trip, rest):
+        return f"🗑 Stopped tracking {trip['flight']} on {trips.fmt_day(trip, cfg['time_zone'])}.", False
+
     def on_command(topic, text):
         verb, ident, _, _ = commands.parse(text)
-        if verb in ("inbound", "trips", "cancel"):
+        if verb in ("inbound", "trips", "cancel", "change"):
             if not any(w["topic"] == topic for w in cfg["watchers"]):
                 return
+            now = time.time()
             if verb == "inbound":
                 reply = on_inbound(topic, ident)
             elif verb == "trips":
                 reply = trips.describe_all(trips.for_topic(topic), cfg["time_zone"])
+            elif verb == "change":
+                reply = trips.modify(topic, ident, on_change, now, cfg["time_zone"])
             else:
-                n = trips.cancel(topic, ident)
-                reply = f"🗑 Stopped tracking {ident}." if n else f"🤷 No trip for {ident}."
+                reply = trips.modify(topic, ident, on_cancel, now, cfg["time_zone"])
             log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0])
             send({"topic": topic, "message": reply, "tags": ["robot"], "priority": 2})
             return
@@ -511,15 +536,24 @@ def run():
             changed = len(active) != len(all_trips)
             outgoing = []
             for t in active:
-                if cfg["adb_key"] and trips.due_for_check(t, now):
-                    changed = True
-                    try:
-                        notes = trips.resolve(t, cfg["adb_key"], USER_AGENT)
-                        t["last_check"] = now
-                        outgoing += [(t, *m) for m in trips.change_messages(t, notes, cfg["time_zone"])]
-                    except trips.AdbError as e:
-                        errors.append(str(e))
-            for kind, key in {trips.inbound_key(t) for t in active if not t.get("landed")} - {None}:
+                level = trips.check_level(t, now) if cfg["adb_key"] else None
+                if not level:
+                    continue
+                changed = True
+                try:
+                    notes = trips.resolve(t, cfg["adb_key"], USER_AGENT, full=level == "full")
+                    t["last_check"] = now
+                    if any(n[0] == "missing" for n in notes):
+                        time.sleep(1.1)
+                        t["replacement"] = trips.find_replacement(t, cfg["adb_key"], USER_AGENT)
+                except trips.AdbError as e:
+                    errors.append(str(e))
+                    continue
+                mine = sorted((x for x in active if x["topic"] == t["topic"]), key=trips.sort_key)
+                number = next(i for i, x in enumerate(mine, 1) if x is t)
+                outgoing += [(t, *m) for m in trips.change_messages(t, notes, cfg["time_zone"], number)]
+            live = [t for t in active if not t.get("landed") and trips.is_live(t, now)]
+            for kind, key in {trips.inbound_key(t) for t in live} - {None}:
                 if key in fixes:
                     continue
                 try:
@@ -531,9 +565,9 @@ def run():
                 except (urllib.error.URLError, OSError, ValueError) as e:
                     errors.append(f"{key}: {e}")
                 time.sleep(1.1)
-            for t in active:
+            for t in live:
                 k = trips.inbound_key(t)
-                if not k or k[1] not in fixes or t.get("landed"):
+                if not k or k[1] not in fixes:
                     continue
                 msgs = trips.step(t, fixes[k[1]], now, airports, cfg["time_zone"],
                                   lambda trip, cs: trips.route_destination(trip, cs, USER_AGENT))

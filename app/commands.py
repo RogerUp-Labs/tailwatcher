@@ -45,7 +45,9 @@ HELP = (
     "• info N12345 — who owns it, what it is, where it is now\n"
     "• inbound UA1234 N38473 dep 4:30pm — follow the plane flying in for your flight\n"
     "  (with an AeroDataBox key in Configure, just: inbound UA1234)\n"
-    "• trips — your trips · cancel UA1234 — stop tracking one"
+    "• trips — your trips, numbered\n"
+    "• change 1 AA5678 / change 1 dep 5:10pm / change 1 N38473 / change 1 11/15 — update trip 1\n"
+    "• cancel 1 — stop tracking trip 1"
 )
 
 WEEKDAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -125,7 +127,7 @@ def merge_flight_words(words, i):
 def parse(text, now=None, tz=DEFAULT_TZ):
     """Parse a message into (verb, ident, label, expires).
 
-    verb is add/remove/list/help/info/inbound/trips/cancel/unknown; ident is the tail or flight number
+    verb is add/remove/list/help/info/inbound/trips/cancel/change/unknown; ident is the tail or flight number
     as typed; expires is a Unix time or None.
     """
     now = time.time() if now is None else now
@@ -144,7 +146,9 @@ def parse(text, now=None, tz=DEFAULT_TZ):
     if first in ("trips", "inbound", "trip") and len(words) == 1:
         return "trips", None, "", None
     if first in ("cancel",) and len(words) >= 2:
-        return "cancel", merge_flight_words(words[1:], 0)[0], "", None
+        return "cancel", " ".join(words[1:]), "", None  # "2", "AA1234" or "AA1234 11/14"
+    if first in ("change", "update", "edit") and len(words) >= 3:
+        return "change", " ".join(words[1:]), "", None  # parsed by trips.select/apply_change
     if first in ("add", "watch", "+") and len(words) >= 2:
         verb, words = "add", merge_flight_words(words[1:], 0)
     elif first in ("remove", "rm", "delete", "del", "unwatch", "-") and len(words) >= 2:
@@ -269,7 +273,7 @@ def apply_command(path, topic, text, status=None, now=None):
             return format_list(watcher, status, now), False
         if verb == "help":
             return HELP, False
-        if verb in ("info", "inbound", "trips", "cancel"):
+        if verb in ("info", "inbound", "trips", "cancel", "change"):
             return None, False  # handled by the caller (network lookups / trips.json)
         if verb == "unknown":
             return "🤔 I didn't understand that. Send \"help\" for commands.", False

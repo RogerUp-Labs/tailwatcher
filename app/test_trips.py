@@ -141,32 +141,172 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(trips.resolve(trip, "k", "ua", get=self.fake_get([[]])[0]), [])
         self.assertIsNone(trip["inbound"])
 
-    def test_month_ahead_without_schedule(self):
+    def test_month_ahead_trip_is_kept_until_its_date(self):
         trip = trips.parse_inbound("AA1234 11/14", NOON, TZ, AIR)
-        self.assertEqual(trip["date"], "2026-11-14")
-        self.assertIsNone(trip["dep_time"])
-        # Kept until the trip date, not 36h after it was added.
+        self.assertEqual((trip["date"], trip["dep_time"]), ("2026-11-14", None))
         self.assertGreater(trips.expires_at(trip), ts(2026, 11, 15, 0))
         self.assertLess(trips.expires_at(trip), ts(2026, 11, 16, 12))
-        # Checked once a day while far off, every 6h in the last couple of days.
-        trip["last_check"] = NOON
-        self.assertFalse(trips.due_for_check(trip, NOON + 12 * 3600))
-        self.assertTrue(trips.due_for_check(trip, NOON + 25 * 3600))
-        trip["last_check"] = ts(2026, 11, 13, 6)
-        self.assertTrue(trips.due_for_check(trip, ts(2026, 11, 13, 13)))
-        # Once AeroDataBox has the schedule, the departure-time checkpoints take over.
         trip["dep_time"] = ts(2026, 11, 14, 16)
         self.assertEqual(trips.expires_at(trip), ts(2026, 11, 14, 19))
 
-    def test_checkpoints(self):
+    def test_check_schedule_scales_with_distance(self):
+        trip = trips.parse_inbound("AA1234 11/24", NOON, TZ, AIR)   # 35 days out
+        trip["dep_time"] = ts(2026, 11, 24, 16)
+        self.assertEqual(trips.check_level(trip, NOON), "light")     # never checked
+        trip["last_check"] = NOON
+        self.assertIsNone(trips.check_level(trip, NOON + 3 * 86400))
+        self.assertEqual(trips.check_level(trip, NOON + 7 * 86400), "light")   # weekly
+        trip["last_check"] = ts(2026, 11, 14, 12)                     # 10 days out: daily
+        self.assertIsNone(trips.check_level(trip, ts(2026, 11, 14, 20)))
+        self.assertEqual(trips.check_level(trip, ts(2026, 11, 15, 13)), "light")
+        # Last day: full checks at 24h, 6h, 2h and 45 min, each once.
+        self.assertEqual(trips.check_level(trip, ts(2026, 11, 23, 16, 30)), "full")
+        self.assertIsNone(trips.check_level(trip, ts(2026, 11, 23, 20)))
+        self.assertEqual(trips.check_level(trip, ts(2026, 11, 24, 10, 30)), "full")
+        self.assertEqual(trip["checkpoints"], [2, 0.75])
+
+    def test_light_check_skips_the_plane_lookup(self):
         trip = trips.parse_inbound("UA1234", NOON, TZ, AIR)
-        trip["dep_time"] = ts(2026, 10, 20, 16, 30)
-        self.assertTrue(trips.due_for_check(trip, ts(2026, 10, 20, 8)))    # 24h point passed
-        self.assertEqual(trip["checkpoints"], [6, 2, 0.75])
-        self.assertTrue(trips.due_for_check(trip, ts(2026, 10, 20, 11)))   # 6h point
-        self.assertFalse(trips.due_for_check(trip, ts(2026, 10, 20, 12)))
-        self.assertTrue(trips.due_for_check(trip, ts(2026, 10, 20, 15)))   # 2h point
-        self.assertEqual(trip["checkpoints"], [0.75])
+        get, calls = self.fake_get([MY_FLIGHT])
+        trips.resolve(trip, "k", "ua", full=False, get=get)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(trip["dep_time"], ts(2026, 10, 20, 16, 45))
+        self.assertEqual(trip["arr_airport"], "KDEN")
+        self.assertIsNone(trip["inbound"])
+
+    def test_flight_disappears_and_comes_back(self):
+        trip = trips.parse_inbound("UA1234", NOON, TZ, AIR)
+        trips.resolve(trip, "k", "ua", full=False, get=self.fake_get([MY_FLIGHT])[0])
+        notes = trips.resolve(trip, "k", "ua", full=False, get=self.fake_get([[]])[0])
+        self.assertEqual(notes, [("missing", None, None)])
+        self.assertTrue(trip["missing"])
+        self.assertEqual(trips.resolve(trip, "k", "ua", full=False, get=self.fake_get([[]])[0]), [])  # said once
+        notes = trips.resolve(trip, "k", "ua", full=False, get=self.fake_get([MY_FLIGHT])[0])
+        self.assertEqual(notes, [("back", None, None)])
+        self.assertFalse(trip["missing"])
+
+    def test_never_listed_is_not_missing(self):
+        trip = trips.parse_inbound("UA1234 11/14", NOON, TZ, AIR)
+        self.assertEqual(trips.resolve(trip, "k", "ua", get=self.fake_get([[]])[0]), [])
+        self.assertFalse(trip["missing"])
+
+    def test_replacement_search(self):
+        trip = trips.parse_inbound("UA1234", NOON, TZ, AIR)
+        trips.resolve(trip, "k", "ua", full=False, get=self.fake_get([[dict(MY_FLIGHT[0], departure=dict(
+            movement("KIAD", "2026-10-20 20:30Z"), scheduledTime={"utc": "2026-10-20 20:30Z",
+                                                                 "local": "2026-10-20 16:30-04:00"}))]])[0])
+        board = {"departures": [
+            {"number": "UA 2200", "departure": movement("KIAD", "2026-10-20 20:40Z"),
+             "arrival": movement("KORD", "2026-10-20 22:00Z")},            # wrong destination
+            {"number": "DL 77", "departure": movement("KIAD", "2026-10-20 20:35Z"),
+             "arrival": movement("KDEN", "2026-10-20 23:40Z")},            # wrong airline
+            {"number": "UA 1999", "departure": movement("KIAD", "2026-10-20 22:30Z"),
+             "arrival": movement("KDEN", "2026-10-21 01:30Z")},            # right, but further off
+            {"number": "UA 5678", "departure": movement("KIAD", "2026-10-20 20:40Z"),
+             "arrival": movement("KDEN", "2026-10-20 23:50Z")},            # the renumbered flight
+        ]}
+        get, calls = self.fake_get([board])
+        rep = trips.find_replacement(trip, "k", "ua", get=get)
+        self.assertEqual(calls[0][0], "/flights/airports/icao/KIAD/2026-10-20T13:30/2026-10-20T19:30")
+        self.assertEqual(calls[0][1]["direction"], "Departure")
+        self.assertEqual(rep, {"flight": "UA5678", "dep_time": ts(2026, 10, 20, 16, 40)})
+        trip.update(missing=True, replacement=rep)
+        msg = trips.change_messages(trip, [("missing", None, None)], TZ, number=2)[0]
+        self.assertIn("disappeared", msg[0])
+        self.assertIn("Looks like it's now UA5678, departing 4:40pm to KDEN", msg[1])
+        self.assertIn('Reply "change 2 UA5678" to switch.', msg[1])
+
+    def test_checkpoints_only_in_last_day(self):
+        trip = trips.parse_inbound("UA1234", NOON, TZ, AIR)
+        trip["dep_time"], trip["last_check"] = ts(2026, 10, 20, 16, 30), NOON - 3600
+        self.assertEqual(trips.check_level(trip, ts(2026, 10, 20, 12, 30)), "full")  # 24h and 6h points
+        self.assertEqual(trip["checkpoints"], [2, 0.75])
+
+
+class ChangeTest(unittest.TestCase):
+    def setUp(self):
+        self.trip = trips.parse_inbound("UA1234 10/24 dep 4:30pm from IAD", NOON, TZ, AIR)
+        self.trip.update(topic="t", source="aerodatabox", seen=True, inbound=None, plane_locked=False)
+
+    def change(self, text):
+        return trips.apply_change(self.trip, text, NOON, TZ, AIR)
+
+    def test_renumber_needs_a_new_lookup_but_keeps_your_time(self):
+        self.assertEqual(self.change("UA5678"), (None, True))
+        t = self.trip
+        self.assertEqual((t["flight"], t["callsign"], t["seen"]), ("UA5678", "UAL5678", False))
+        self.assertEqual((t["date"], t["dep_time"]), ("2026-10-24", ts(2026, 10, 24, 16, 30)))
+
+    def test_new_date_keeps_clock_time(self):
+        self.change("10/27")
+        self.assertEqual((self.trip["date"], self.trip["dep_time"]), ("2026-10-27", ts(2026, 10, 27, 16, 30)))
+
+    def test_time_date_airport_and_plane(self):
+        self.assertEqual(self.change("dep 5:10pm"), (None, False))
+        self.assertEqual(self.trip["dep_time"], ts(2026, 10, 24, 17, 10))
+        err, lookup = self.change("10/25 7am from ORD")
+        self.assertTrue(lookup)
+        self.assertEqual((self.trip["date"], self.trip["dep_time"], self.trip["dep_airport"]),
+                         ("2026-10-25", ts(2026, 10, 25, 7), "KORD"))
+        self.assertEqual(self.change("N38473"), (None, False))
+        self.assertEqual(self.trip["inbound"]["tail"], "N38473")
+        self.assertTrue(self.trip["plane_locked"])
+        self.change("plane UA567")
+        self.assertEqual(self.trip["inbound"]["flight"], "UA567")
+
+    def test_nothing_to_change(self):
+        self.assertIn("What should change", self.change("")[0])
+        self.assertIn("didn't understand", self.change("banana")[0])
+
+
+class SelectTest(unittest.TestCase):
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        for text in ("AA1234 11/14", "UA9 10/22", "AA1234 12/1"):
+            t = trips.parse_inbound(text, NOON, TZ, AIR)
+            t["topic"] = "sam"
+            trips.add(t, self.path)
+
+    def tearDown(self):
+        os.unlink(self.path)
+
+    def test_numbered_soonest_first(self):
+        mine = trips.for_topic("sam", self.path)
+        self.assertEqual([t["date"] for t in mine], ["2026-10-22", "2026-11-14", "2026-12-01"])
+        listing = trips.describe_all(mine, TZ)
+        self.assertTrue(listing.startswith("1. 🧳 UA9"))
+        self.assertIn("2. 🧳 AA1234 · Sat Nov 14", listing)
+        self.assertIn('"cancel 1"', listing)
+
+    def test_select_by_number_flight_and_date(self):
+        mine = trips.for_topic("sam", self.path)
+        self.assertEqual(trips.select(mine, "2 dep 5pm", NOON, TZ)[0]["date"], "2026-11-14")
+        self.assertEqual(trips.select(mine, "2 dep 5pm", NOON, TZ)[1], "dep 5pm")
+        self.assertEqual(trips.select(mine, "UA 9", NOON, TZ)[0]["flight"], "UA9")
+        self.assertIn("2 AA1234 trips", trips.select(mine, "AA1234", NOON, TZ)[1])
+        self.assertEqual(trips.select(mine, "AA1234 12/1", NOON, TZ)[0]["date"], "2026-12-01")
+        self.assertIn("no trip 7", trips.select(mine, "7", NOON, TZ)[1])
+
+    def test_modify_change_and_cancel(self):
+        def rename(trip, rest):
+            trips.apply_change(trip, rest, NOON, TZ, AIR)
+            return "ok", True
+        self.assertEqual(trips.modify("sam", "2 AA5678", rename, NOON, TZ, self.path), "ok")
+        self.assertEqual([t["flight"] for t in trips.for_topic("sam", self.path)], ["UA9", "AA5678", "AA1234"])
+        self.assertEqual(trips.modify("sam", "1", lambda t, r: ("gone", False), NOON, TZ, self.path), "gone")
+        self.assertEqual(len(trips.for_topic("sam", self.path)), 2)
+
+
+class LiveWindowTest(unittest.TestCase):
+    def test_only_followed_in_the_last_day(self):
+        t = trips.parse_inbound("AA1234 N1 11/14 dep 4:05pm", NOON, TZ, AIR)
+        self.assertFalse(trips.is_live(t, NOON))
+        self.assertFalse(trips.is_live(t, ts(2026, 11, 13, 15)))
+        self.assertTrue(trips.is_live(t, ts(2026, 11, 13, 16, 10)))
+        undated = trips.parse_inbound("AA1234 N1 11/14", NOON, TZ, AIR)
+        self.assertFalse(trips.is_live(undated, ts(2026, 11, 12, 12)))
+        self.assertTrue(trips.is_live(undated, ts(2026, 11, 13, 12)))
 
 
 class StepTest(unittest.TestCase):
@@ -237,7 +377,8 @@ class WiringTest(unittest.TestCase):
         self.assertIs(tailwatcher.trips, trips)
         self.assertEqual(commands.parse("inbound UA1234 N1")[:2], ("inbound", "UA1234 N1"))
         self.assertEqual(commands.parse("trips")[0], "trips")
-        self.assertEqual(commands.parse("cancel UA 1234")[:2], ("cancel", "UA1234"))
+        self.assertEqual(commands.parse("cancel 2")[:2], ("cancel", "2"))
+        self.assertEqual(commands.parse("change 1 dep 5:10pm")[:2], ("change", "1 dep 5:10pm"))
 
 
 class StorageTest(unittest.TestCase):
