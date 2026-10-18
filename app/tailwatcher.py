@@ -32,6 +32,7 @@ import edits
 import flights
 import history
 import lookup
+import ntfy_admin
 import trips
 import web
 from commands import entry_key, normalize_tail
@@ -40,7 +41,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.12.0"
+VERSION = "0.13.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
@@ -130,6 +131,8 @@ def load_config(path=CONFIG_PATH, now=None):
         # Installs from before 0.12 used this server's NTFY with a token.
         "ntfy_server": raw.get("ntfyServer") or ("local" if raw.get("ntfyToken") else "public"),
         "ntfy_custom_url": (raw.get("ntfyCustomUrl") or "").strip(),
+        "ntfy_phone_mode": raw.get("ntfyPhoneMode") or "open",
+        "web_password": raw.get("webPassword") is True,
         "adb_key": (raw.get("aerodataboxKey") or "").strip(),
         "web_password": bool(raw.get("webPassword", False)),
     }
@@ -818,9 +821,13 @@ def run():
                          "map_links": cur["map_links"], "text_commands": cur["text_commands"],
                          "aerodatabox": bool(cur["adb_key"]), "ntfy": bool(resolve_ntfy(cur)[0]),
                          "ntfy_server": cur["ntfy_server"], "phone_url": resolve_ntfy(cur)[2],
+                         "ntfy_custom_url": cur["ntfy_custom_url"], "ntfy_token_set": bool(cur["ntfy_token"]),
+                         "ntfy_phone_mode": cur["ntfy_phone_mode"], "local_ntfy": bool(os.environ.get("NTFY_URL")),
+                         "time_zone": cur["time_zone"], "web_password": cur["web_password"],
+                         "time_zones": [[k, v] for k, v in edits.TIME_ZONES.items()],
                          "listening": sorted(names[k] for k in names if k not in listen_errors)},
             "watchers": watchers_out, "trips": trips_out,
-            "history": [dict(e, watcher=names.get(e["topic"], e["topic"])) for e in hist.recent(150)],
+            "history": [dict(e, watcher=names.get(e["topic"]) or e["topic"] or "Settings") for e in hist.recent(150)],
         }
 
     def trip_text(data, number=None):
@@ -838,8 +845,47 @@ def run():
             parts += ["from", str(data["airport"]).strip()]
         return " ".join(p for p in parts if p)
 
+    def ntfy_post(path, data):
+        """Settings panel: save settings, set up this server's NTFY, make a person's login."""
+        local = os.environ.get("NTFY_URL", "").strip()
+        try:
+            if path == "/api/settings":
+                msg = edits.save_settings(CONFIG_PATH, data)
+                hist.add("in", "", "Settings changed on the web", kind="web", status="received")
+                wake.set()
+                return 200, {"ok": True, "message": msg}
+            if path == "/api/ntfy-setup":
+                phones = "login" if data.get("phones") == "login" else "open"
+                token, steps = ntfy_admin.setup(local, str(data.get("adminPassword") or ""), phones)
+                logins = []
+                if phones == "login":
+                    for w in load_config()["watchers"]:
+                        user, pw = ntfy_admin.create_login(local, str(data.get("adminPassword")), w["name"], w["topic"])
+                        logins.append({"name": w["name"], "username": user, "password": pw})
+                    if logins:
+                        steps.append(f"Made NTFY logins for {', '.join(l['name'] for l in logins)}")
+                with commands.CONFIG_LOCK:
+                    raw = commands.read_raw(CONFIG_PATH)
+                    raw.update(ntfyServer="local", ntfyToken=token, ntfyPhoneMode=phones)
+                    commands.write_raw(CONFIG_PATH, raw)
+                hist.add("in", "", "Set up this server's NTFY from the web", kind="web", status="received")
+                wake.set()
+                return 200, {"ok": True, "message": "NTFY is set up.", "steps": steps, "logins": logins}
+            if path == "/api/ntfy-login":
+                w = next((x for x in load_config()["watchers"] if x["topic"] == data.get("topic")), None)
+                if w is None:
+                    return 404, {"ok": False, "message": "That watcher no longer exists."}
+                user, pw = ntfy_admin.create_login(local, str(data.get("adminPassword") or ""), w["name"], w["topic"])
+                return 200, {"ok": True, "message": f"Made an NTFY login for {w['name']}.",
+                             "logins": [{"name": w["name"], "username": user, "password": pw}]}
+        except (edits.EditError, ntfy_admin.SetupError) as e:
+            return 400, {"ok": False, "message": str(e)}
+        return 404, {"ok": False, "message": "Not found."}
+
     def handle_post(path, data):
         """Edits from the Web UI. Returns (http_status, {"ok", "message"})."""
+        if path in ("/api/settings", "/api/ntfy-setup", "/api/ntfy-login"):
+            return ntfy_post(path, data)
         topic = str(data.get("topic") or "")
         op = data.get("op")
         names = {w["topic"]: w["name"] for w in load_config()["watchers"]}  # fresh: see snapshot()
@@ -898,6 +944,9 @@ def run():
         failed = (msg.startswith(("❌", "🤔", "🤷", "Which trip", "Tell me your flight", "You have "))
                   and not msg.startswith("🤷 AeroDataBox has nothing"))  # that one still saves the trip
         if not failed:
+            if path == "/api/watcher" and not topic:  # a new watcher's topic was just generated
+                topic = next((w["topic"] for w in load_config()["watchers"]
+                              if w["name"] == str(data.get("name") or "").strip()), "")
             hist.add("in", topic or data.get("topic") or "", msg.splitlines()[0], kind="web", status="received")
             wake.set()
         log.info("web edit %s %s → %s", path, op, msg.splitlines()[0])

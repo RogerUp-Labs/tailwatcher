@@ -10,5 +10,5 @@ export const long = {
 
 export const installAlert = {
   en_US:
-    'Open the TailWatcher Web UI, add a watcher for each person, and use "Connect phone" to send them a one-tap link for the free ntfy app. Alerts go through the public ntfy.sh service by default; to keep them on your own hardware instead, install NTFY and pick "This server\'s NTFY" in Configure.',
+    'Open the TailWatcher Web UI, add a watcher for each person, and use "Connect phone" to send them a one-tap link for the free ntfy app. Alerts go through the public ntfy.sh service by default; to keep them on your own hardware instead, install NTFY and use "Set up NTFY for me" in the Web UI\'s Settings.',
 }

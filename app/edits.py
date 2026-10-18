@@ -16,6 +16,22 @@ import trips
 TOPIC_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 PRIORITIES = ("low", "default", "high", "max")
 MAX_WATCHERS = 20
+TIME_ZONES = {
+    "America/New_York": "US Eastern",
+    "America/Chicago": "US Central",
+    "America/Denver": "US Mountain",
+    "America/Phoenix": "Arizona",
+    "America/Los_Angeles": "US Pacific",
+    "America/Anchorage": "Alaska",
+    "Pacific/Honolulu": "Hawaii",
+    "America/Halifax": "Atlantic (Canada)",
+    "Europe/London": "UK / Ireland",
+    "Europe/Paris": "Central Europe",
+    "Europe/Helsinki": "Eastern Europe",
+    "Asia/Tokyo": "Japan",
+    "Australia/Sydney": "Australia Eastern",
+    "UTC": "UTC",
+}  # keep in sync with timeZones in startos/fileModels/config.json.ts
 
 
 def new_topic(name):
@@ -151,3 +167,59 @@ def remove_aircraft(path, topic, ident):
         aircraft.remove(entry)
         commands.write_raw(path, raw)
     return f"Removed {ident} from {watcher.get('name')}'s list."
+
+
+def save_settings(path, data):
+    """Apply the Web UI Settings panel. Only keys present in `data` change;
+    secrets are only set when a new value is typed, or cleared on request."""
+    changes = {}
+
+    def choice(key, allowed):
+        if data[key] not in allowed:
+            raise EditError(f"Invalid {key}.")
+        return data[key]
+    if "ntfyServer" in data:
+        changes["ntfyServer"] = choice("ntfyServer", ("public", "local", "custom"))
+    if "ntfyCustomUrl" in data:
+        url = str(data["ntfyCustomUrl"] or "").strip().rstrip("/")
+        if url and not re.match(r"^https?://\S+$", url):
+            raise EditError("The custom server address must start with https:// or http://.")
+        changes["ntfyCustomUrl"] = url
+    if data.get("ntfyToken"):
+        token = str(data["ntfyToken"]).strip()
+        if not re.match(r"^tk_[A-Za-z0-9]+$", token):
+            raise EditError("NTFY tokens start with tk_.")
+        changes["ntfyToken"] = token
+    if data.get("clearNtfyToken"):
+        changes["ntfyToken"] = ""
+    if "ntfyPhoneMode" in data:
+        changes["ntfyPhoneMode"] = choice("ntfyPhoneMode", ("open", "login"))
+    if data.get("aerodataboxKey"):
+        changes["aerodataboxKey"] = str(data["aerodataboxKey"]).strip()
+    if data.get("clearAerodatabox"):
+        changes["aerodataboxKey"] = ""
+    if "dataSource" in data:
+        changes["dataSource"] = choice("dataSource", ("adsb.fi", "adsb.lol"))
+    if "mapLinks" in data:
+        changes["mapLinks"] = choice("mapLinks", ("adsbx", "adsblol", "both"))
+    if "timeZone" in data:
+        changes["timeZone"] = choice("timeZone", tuple(TIME_ZONES))
+    if "pollSeconds" in data:
+        try:
+            secs = int(data["pollSeconds"])
+        except (TypeError, ValueError):
+            raise EditError("Check every must be a number of seconds.") from None
+        if not 15 <= secs <= 600:
+            raise EditError("Check every must be between 15 and 600 seconds.")
+        changes["pollSeconds"] = secs
+    for key in ("textCommands", "webPassword"):
+        if key in data:
+            changes[key] = bool(data[key])
+    with commands.CONFIG_LOCK:
+        raw = commands.read_raw(path)
+        if changes.get("ntfyServer", raw.get("ntfyServer")) == "custom" and not changes.get(
+                "ntfyCustomUrl", raw.get("ntfyCustomUrl")):
+            raise EditError("Enter the custom server's address.")
+        raw.update(changes)
+        commands.write_raw(path, raw)
+    return "Settings saved."

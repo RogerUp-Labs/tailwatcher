@@ -316,6 +316,7 @@ export const configure = sdk.Action.withInput(
       timeZone: input.timeZone,
       aerodataboxKey: input.aerodataboxKey?.trim() ?? '',
       ntfyServer: input.ntfyServer,
+      ntfyPhoneMode: prev?.ntfyPhoneMode ?? 'open',
       ntfyCustomUrl: input.ntfyCustomUrl?.trim() ?? '',
       webPassword: input.webPassword,
     })

@@ -19,7 +19,7 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 
 ## Build
 
-- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.12.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
+- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.13.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
 - Packing needs a git commit (it records the hash) and the `assets/` dir.
 - `make install` sideloads to the host in `~/.startos/config.yaml`.
 
@@ -27,6 +27,7 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 
 - `info` runs in the topic listener thread, outside CONFIG_LOCK; `apply_command` returns (None, False) for it. `on_info` lives inside `run()` in tailwatcher.py, so a missing module import only fails live; `test_lookup` checks the import.
 - Notification server (0.12+): `ntfyServer` = public (ntfy.sh, default for new installs; no NTFY package, unguessable `tw-<name>-<20 random>` topics from `edits.new_topic()` / `newTopic()` in startos/utils.ts are the only lock), local (this Start9's NTFY via NTFY_URL; pre-0.12 installs migrated here) or custom (`ntfyCustomUrl`). `resolve_ntfy()` never sends the token to ntfy.sh. The NTFY dependency is optional and only declared when local. main.ts passes NTFY_PHONE_URL (NTFY's public or .local HTTPS address) for the dashboard's "Connect phone" `ntfy://host/topic` links. The user's goal: setup should need TailWatcher only, like Canary.
+- Web UI ⚙ Settings (`openSettings()` in index.html) edits the same config.json as Configure via `edits.save_settings()` (only given keys change; blank secret fields mean unchanged). "Set up NTFY for me" (`ntfy_admin.setup()`, POST /api/ntfy-setup) uses NTFY's admin API with the typed admin password, never stored: creates/resets user `tailwatcher` (409 → PUT), grants it rw on `tw-*`, phones `open` = anonymous user `*` rw on `tw-*` (NTFY's API name for anonymous) or `login` = revoke that and `create_login()` per watcher, then mints a token as `tailwatcher`. `ntfyPhoneMode` records the choice.
 - NTFY on StartOS is deny-all. TailWatcher uses a token for a **regular** NTFY user (`tailwatcher`) with Read-Write on `tailwatcher*`, minted in the NTFY web UI (Account → Access tokens; same as POST /v1/account/token). NTFY's Provision Publisher makes a `pkg_` account that is write-only, and Grant User Topic Access hides `pkg_` users, so a publisher token can send alerts but never read text commands. A 403 on the command stream shows in health and retries every 60s.
 - AeroDataBox: the API.market listing is a 7-day trial; the RapidAPI Basic plan is the free one (400 requests/month). Its webhooks need TailWatcher reachable from the internet, so trips poll at checkpoints instead. Sample responses in test_trips.py follow the OpenAPI spec (doc.aerodatabox.com/docs/openapi-rapidapi-v1.json) and haven't been checked against a live key yet.
 - Airport codes: 3 letters resolve as IATA first (some small airport's ident is often the same 3 letters, e.g. "LAS"); airports.csv carries an `iata` column for this.

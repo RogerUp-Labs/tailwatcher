@@ -66,6 +66,8 @@ const shape = z.object({
    */
   ntfyServer: z.enum(['public', 'local', 'custom']).catch('public'),
   ntfyCustomUrl: z.string().catch(''),
+  /** With this server's NTFY: open = phones subscribe to tw-* without a login; login = one NTFY account each. */
+  ntfyPhoneMode: z.enum(['open', 'login']).catch('open'),
   /** Optional RapidAPI key for AeroDataBox; lets "inbound UA1234" find the plane itself. */
   aerodataboxKey: z.string().catch(''),
   /** Ask for the Web UI password (webui.json). Off: the dashboard is open to anyone who can reach it. */

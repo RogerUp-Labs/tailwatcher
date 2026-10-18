@@ -13,10 +13,10 @@ That's all. No NTFY package, users or tokens are needed.
 
 ### Where alerts go
 
-**Configure → Notification Server** decides:
+**⚙ Settings** in the Web UI (or **Configure → Notification Server**) decides:
 
 - **ntfy.sh** (default, easiest): the free public ntfy service. Each watcher's topic is a long random name, which is what keeps their alerts private: anyone who knew it could read them, so don't post Connect phone links publicly. iPhones get alerts instantly this way.
-- **This server's NTFY** (private): alerts stay on your hardware. Install **NTFY**, then in NTFY run **Set Anonymous Topic Access** once for topic `tw-*` with **Read-Write**. If your NTFY should require logins instead, give TailWatcher a token in Configure and each person a user (see NTFY's own instructions). Note that self-hosted NTFY can deliver to iPhones slowly.
+- **This server's NTFY** (private): alerts stay on your hardware. Install **NTFY**, then in TailWatcher's Web UI open **⚙ Settings**, choose **This server's NTFY**, enter NTFY's admin password and tap **Set up NTFY for me**. TailWatcher creates its own NTFY user, gives it access to the `tw-*` topics, saves a token, and sets how phones connect: **without a login** (recommended; just the Connect phone link) or **one NTFY login per person** (TailWatcher makes each account; the Connect phone dialog has a **Create NTFY login** button for people added later). The admin password is used for that setup only and never saved. Note that self-hosted NTFY can deliver to iPhones slowly.
 - **Custom**: another ntfy server, at the address you enter.
 
 TailWatcher only sends the NTFY token to your own or a custom server, never to ntfy.sh.

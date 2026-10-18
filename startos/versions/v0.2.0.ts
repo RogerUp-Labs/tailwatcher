@@ -38,6 +38,7 @@ export const v0_2_0 = VersionInfo.of({
         webPassword: false,
         ntfyServer: 'local',
         ntfyCustomUrl: '',
+        ntfyPhoneMode: 'open',
       })
     },
     down: IMPOSSIBLE,
