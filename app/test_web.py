@@ -94,6 +94,15 @@ class PageTest(unittest.TestCase):
         for marker in ("function ", "=>", "const ", "return "):
             self.assertNotIn(marker, self.css)
 
+    def test_help_links_point_at_real_guide_sections(self):
+        import re
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "instructions.md")) as f:
+            headings = re.findall(r"^#{2,3}\s+(.*)$", f.read(), re.M)
+        slugs = {re.sub(r"[^a-z0-9]+", "-", h.lower()).strip("-") for h in headings}
+        linked = set(re.findall(r'data-section="([a-z0-9-]+)"', self.page)) | {"for-people-getting-alerts"}
+        self.assertEqual(linked - slugs, set())
+
     def test_helpers_used_in_templates_are_defined(self):
         import re
         called = set(re.findall(r"\$\{([a-zA-Z_]\w*)\(", self.js))

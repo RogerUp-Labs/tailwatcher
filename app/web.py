@@ -24,7 +24,8 @@ WEB_DIR = os.environ.get("TW_WEB_DIR", os.path.join(os.path.dirname(os.path.absp
 PASSWORD_PATH = os.environ.get("TW_WEB_PASSWORD", "/data/webui.json")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/index.html": ("index.html", "text/html; charset=utf-8"),
-         "/icon.svg": ("icon.svg", "image/svg+xml")}
+         "/icon.svg": ("icon.svg", "image/svg+xml"),
+         "/guide.md": ("guide.md", "text/markdown; charset=utf-8")}  # instructions.md, for ? Help
 
 
 def read_password(path=PASSWORD_PATH):

@@ -255,6 +255,26 @@ dialog.wide { width: min(560px, calc(100vw - 32px)); }
 .steps-done { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ok); display: grid; gap: 3px; }
 .creds { font-family: var(--mono); font-size: 13px; background: var(--brand-soft); padding: 8px 10px; border-radius: 8px; overflow-wrap: anywhere; }
 .status-line { font-size: 13px; color: var(--text-2); }
+dialog.help { width: min(720px, calc(100vw - 24px)); }
+.help-top { position: sticky; top: 0; background: var(--surface); padding-bottom: 8px; z-index: 1; display: grid; gap: 8px; }
+.help-top input { font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); width: 100%; }
+.help-toc { display: flex; flex-wrap: wrap; gap: 6px; }
+.help-toc a { font-size: 12.5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; }
+.guide { font-size: 14.5px; line-height: 1.55; color: var(--text); max-height: min(68vh, 900px); overflow: auto; padding-right: 4px; }
+.guide h2 { font-size: 18px; margin: 22px 0 8px; text-transform: none; letter-spacing: 0; color: var(--text); display: block; font-family: inherit; font-weight: 700; }
+.guide section:first-child h2 { margin-top: 4px; }
+.guide h3 { font-size: 15.5px; margin: 16px 0 6px; }
+.guide p { margin: 8px 0; }
+.guide ul, .guide ol { margin: 6px 0; padding-left: 22px; }
+.guide li { margin: 3px 0; }
+.guide code { font-family: var(--mono); font-size: 13px; background: var(--surface-2); border: 1px solid var(--border); padding: 0 5px; border-radius: 5px; }
+.guide table { border-collapse: collapse; width: 100%; font-size: 13.5px; margin: 8px 0; }
+.guide td, .guide th { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+.guide blockquote { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--brand); background: var(--surface-2); color: var(--text-2); }
+.guide mark { background: #ffe58a; color: #1a1300; border-radius: 3px; padding: 0 1px; }
+.guide .hidden { display: none; }
+.guide .copy-for { float: right; margin-top: -2px; }
+.help-link { font-size: 12.5px; }
 .form-error:empty { display: none; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 4px; }
 .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%) translateY(20px); opacity: 0; transition: .25s; background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; max-width: calc(100vw - 32px); white-space: pre-line; z-index: 20; pointer-events: none; }
@@ -349,6 +369,7 @@ dialog.wide { width: min(560px, calc(100vw - 32px)); }
     <img src="icon.svg" alt="">
     <div class="brand">TailWatcher<small id="sub">Takeoff alerts for the planes you follow</small></div>
     <div class="status" role="status" aria-live="polite"><i class="dot wait" id="dot"></i><span id="statusText">Loading…</span></div>
+    <button type="button" class="gear" data-act="help" aria-label="Help">?<span class="gear-label"> Help</span></button>
     <button type="button" class="gear" data-act="settings" aria-label="Settings">⚙<span class="gear-label"> Settings</span></button>
     <div class="themes" role="group" aria-label="Theme">
       <button type="button" data-theme="modern">Modern</button>
@@ -766,7 +787,7 @@ function tripForm(t) {
     [{name: "time", label: "Departs", type: "time", value: t && t.dep_time ? hhmm(t.dep_time) : "", hint: adb && !t ? "Optional with AeroDataBox" : "Your local time"},
      {name: "airport", label: "From airport", value: t ? apt(t.dep_airport) : "", placeholder: "IAD", hint: "Optional"}],
     {name: "plane", label: "Plane flying in", value: inb.tail || inb.flight || "", placeholder: "N38473 or UA567",
-     hint: adb ? "Leave blank and AeroDataBox finds it." : "From your airline app's \"Where's my plane?\" screen."},
+     hint: adb ? "Leave blank and AeroDataBox finds it. See ? Help → Trips." : "From your airline app's \"Where's my plane?\" screen. See ? Help → Trips."},
     {name: "share", label: "Share with", type: "checks", value: t ? t.shared_with : [],
      options: LAST.watchers.filter((w) => !t || w.topic !== t.topic).map((w) => [w.topic, w.name]),
      hint: "They get your flight's departure and landing, nothing else."},
@@ -794,6 +815,7 @@ function watcherForm(w) {
       [{name: "priority", label: "Priority", type: "select", value: w ? w.priority : "default",
         options: [["low", "Low"], ["default", "Default"], ["high", "High"], ["max", "Max"]]},
        {name: "notifyLanding", label: "Landing alerts too", type: "check", value: w ? w.notify_landing : false}],
+      ...(w ? [{name: "newTopic", label: "Give them a new topic (then reconnect their phone)", type: "check", value: false}] : []),
     ],
     save: async (v) => {
       const r = await api("api/watcher", {op: "save", original: w ? w.topic : null, ...v});
@@ -857,7 +879,7 @@ function connectPhone(w) {
       : local && !LAST.settings.ntfy_token_set ? `<li class="note">This server's NTFY isn't set up yet: open ⚙ Settings and use "Set up NTFY for me".</li>` : ""}
       ${LAST.settings.text_commands ? `<li>They can also type in that topic to manage their list. "help" shows the commands.</li>` : ""}
     </ol></div>
-    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Done</button></div>`;
+    <div class="dlg-actions"><button type="button" class="linkbtn help-link" data-act="help" data-section="connecting-a-phone" style="margin-right:auto">? Help with connecting</button><button type="button" class="btn" id="dlg-cancel">Done</button></div>`;
   form.onsubmit = (e) => e.preventDefault();
   $("dlg-cancel").onclick = () => $("dlg").close();
   if ($("cp-login")) $("cp-login").onclick = async () => {
@@ -878,6 +900,152 @@ function connectPhone(w) {
   $("dlg").showModal();
 }
 
+/* ---------- help ---------- */
+let GUIDE = null;  // [{id, level, title, html, text}] parsed from guide.md (the StartOS instructions)
+const slugify = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+function inline(text) {
+  // text is already HTML-escaped
+  return text.replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<i>$2</i>")
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
+/** A small Markdown subset: headings, paragraphs, lists (one nesting level), tables, quotes. */
+function renderBlocks(lines) {
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    if (line.startsWith("|")) {
+      const rows = [];
+      while (i < lines.length && lines[i].startsWith("|")) rows.push(lines[i++]);
+      const cells = (r) => r.replace(/^\||\|$/g, "").split("|").map((c) => inline(esc(c.trim())));
+      const body = rows.filter((r) => !/^\|[\s|:-]+\|$/.test(r));
+      out.push(`<table><thead><tr>${cells(body[0]).map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${body.slice(1).map((r) => `<tr>${cells(r).map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    if (line.startsWith(">")) {
+      const q = [];
+      while (i < lines.length && lines[i].startsWith(">")) q.push(inline(esc(lines[i++].replace(/^>\s?/, ""))));
+      out.push(`<blockquote>${q.join("<br>")}</blockquote>`);
+      continue;
+    }
+    const ordered = /^\d+\.\s/.test(line);
+    if (ordered || /^-\s/.test(line)) {
+      const items = [];
+      while (i < lines.length && (/^(\d+\.|-)\s/.test(lines[i]) || /^\s{2,}\S/.test(lines[i]))) {
+        if (/^\s{2,}-\s/.test(lines[i]) && items.length) (items[items.length - 1].sub ||= []).push(lines[i].trim().replace(/^-\s/, ""));
+        else if (/^\s{2,}\S/.test(lines[i]) && items.length) items[items.length - 1].text += " " + lines[i].trim();
+        else items.push({text: lines[i].replace(/^(\d+\.|-)\s/, "")});
+        i++;
+      }
+      const tag = ordered ? "ol" : "ul";
+      out.push(`<${tag}>${items.map((it) => `<li>${inline(esc(it.text))}${it.sub ? `<ul>${it.sub.map((x) => `<li>${inline(esc(x))}</li>`).join("")}</ul>` : ""}</li>`).join("")}</${tag}>`);
+      continue;
+    }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !/^(#|\||>|-\s|\d+\.\s)/.test(lines[i])) para.push(lines[i++]);
+    out.push(`<p>${inline(esc(para.join(" ")))}</p>`);
+  }
+  return out.join("");
+}
+
+function parseGuide(md) {
+  const sections = [];
+  let cur = null;
+  for (const line of md.split("\n")) {
+    const h = /^(#{2,3})\s+(.*)$/.exec(line);
+    if (h) {
+      cur = {id: slugify(h[2]), level: h[1].length, title: h[2], lines: []};
+      sections.push(cur);
+    } else if (cur) cur.lines.push(line);
+  }
+  return sections.map((sec) => ({...sec, html: renderBlocks(sec.lines),
+    text: (sec.title + " " + sec.lines.join(" ")).replace(/[`*|>#]/g, " ").replace(/\s+/g, " ")}));
+}
+
+async function openHelp(target) {
+  const form = $("dlg-form"), dlg = $("dlg");
+  dlg.classList.add("help");
+  form.innerHTML = `<div class="help-top"><h3 id="dlg-title">Help</h3>
+      <input type="search" id="help-q" placeholder="Search the guide, e.g. iphone, renumbered, share" aria-label="Search the guide" autocomplete="off">
+      <div class="help-toc" id="help-toc"></div></div>
+    <div class="guide" id="guide">Loading…</div>
+    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Close</button></div>`;
+  form.onsubmit = (e) => e.preventDefault();
+  $("dlg-cancel").onclick = () => dlg.close();
+  dlg.addEventListener("close", () => dlg.classList.remove("help"), {once: true});
+  dlg.showModal();
+  if (!GUIDE) {
+    try {
+      const url = location.origin + location.pathname.replace(/[^/]*$/, "") + "guide.md";
+      const r = await fetch(url, {cache: "no-store", credentials: "same-origin"});
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      GUIDE = parseGuide(await r.text());
+    } catch (err) {
+      $("guide").textContent = "Couldn't load the guide (" + err.message + "). It's also under Instructions in StartOS.";
+      return;
+    }
+  }
+  $("help-toc").innerHTML = GUIDE.filter((x) => x.level === 2).map((x) => `<a href="#h-${x.id}" data-help-jump="${x.id}">${esc(x.title)}</a>`).join("");
+  $("guide").innerHTML = GUIDE.map((x) => `<section id="h-${x.id}" data-level="${x.level}">
+      ${x.id === "for-people-getting-alerts" ? `<button type="button" class="btn copy-for" id="help-copy">Copy for them</button>` : ""}
+      <h${x.level}>${esc(x.title)}</h${x.level}>${x.html}</section>`).join("");
+  $("help-toc").onclick = (e) => {
+    const a = e.target.closest("[data-help-jump]");
+    if (a) { e.preventDefault(); $("help-q").value = ""; filterHelp(""); jumpTo(a.dataset.helpJump); }
+  };
+  if ($("help-copy")) $("help-copy").onclick = async () => {
+    const sec = GUIDE.find((x) => x.id === "for-people-getting-alerts");
+    const text = sec.lines.filter((l) => !l.startsWith("*A short")).join("\n").replace(/\*\*|`/g, "").trim();
+    try { await navigator.clipboard.writeText("TailWatcher alerts\n\n" + text); toast("Copied. Paste it into a message to them."); }
+    catch (e) { toast("Couldn't copy here; select the text instead."); }
+  };
+  $("help-q").oninput = (e) => filterHelp(e.target.value);
+  if (target && $("h-" + target)) jumpTo(target);
+  else if (matchMedia("(hover: hover)").matches) $("help-q").focus();
+}
+
+function jumpTo(id) {
+  // Scroll only the guide (scrollIntoView would also scroll the dialog and page).
+  const g = $("guide"), sec = $("h-" + id);
+  g.scrollTop += sec.getBoundingClientRect().top - g.getBoundingClientRect().top;
+}
+
+function filterHelp(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  let shown = 0, parent = null;
+  for (const x of GUIDE) {
+    const el = $("h-" + x.id);
+    if (x.level === 2) parent = el;
+    const hit = !words.length || words.every((w) => x.text.toLowerCase().includes(w));
+    el.classList.toggle("hidden", !hit);
+    if (hit) { shown++; if (x.level === 3 && parent) parent.classList.remove("hidden"); }
+    el.querySelectorAll("mark").forEach((m) => m.replaceWith(m.textContent));
+    if (hit && words.length) highlight(el, words);
+  }
+  const none = $("help-none");
+  if (!shown && !none) $("guide").insertAdjacentHTML("beforeend", `<p id="help-none" class="muted">Nothing found. Try another word, or browse the topics above.</p>`);
+  else if (shown && none) none.remove();
+}
+
+function highlight(root, words) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const re = new RegExp("(" + words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi");
+  for (const n of nodes) {
+    if (!re.test(n.nodeValue) || n.parentNode.closest("button")) continue;
+    re.lastIndex = 0;
+    const span = document.createElement("span");
+    span.innerHTML = esc(n.nodeValue).replace(re, "<mark>$1</mark>");
+    n.replaceWith(...span.childNodes);
+  }
+}
+
 /* ---------- settings ---------- */
 const sel = (name, value, options) => `<select id="s-${name}" name="${name}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
 const radio = (name, value, current, title, hint) => `<label class="radio-card"><input type="radio" name="${name}" value="${value}" ${value === current ? "checked" : ""}><span>${title}</span><small>${hint}</small></label>`;
@@ -888,7 +1056,7 @@ function openSettings() {
   const s = LAST.settings, form = $("dlg-form");
   $("dlg").classList.add("wide");
   form.innerHTML = `<h3 id="dlg-title">Settings</h3>
-    <div class="set-section"><h4>Notifications</h4>
+    <div class="set-section"><h4>Notifications <button type="button" class="linkbtn help-link" data-act="help" data-section="settings-and-where-alerts-go">? Help</button></h4>
       ${radio("ntfyServer", "public", s.ntfy_server, "ntfy.sh <small>(easiest)</small>", "The free public ntfy service. Nothing to install; each person's topic is a long random name, which keeps their alerts private.")}
       ${radio("ntfyServer", "local", s.ntfy_server, "This server's NTFY <small>(private)</small>", "Alerts stay on your hardware. Needs the NTFY package; TailWatcher sets it up for you below.")}
       ${radio("ntfyServer", "custom", s.ntfy_server, "Another ntfy server", "Any ntfy server you run elsewhere.")}
@@ -985,6 +1153,7 @@ function onAction(btn) {
   if (act === "add-watcher") return watcherForm(null);
   if (act === "connect" && w) return connectPhone(w);
   if (act === "settings") return openSettings();
+  if (act === "help") return openHelp(btn.dataset.section);
   if (act === "edit-watcher" && w) return watcherForm(w);
   if (act === "add-aircraft" && w) return aircraftForm(w, null);
   if (act === "edit-aircraft" && w) return aircraftForm(w, w.aircraft.find((a) => a.ident === ident));
@@ -1007,7 +1176,7 @@ function render(d) {
   renderStats(d);
   if (THEME === "board") { renderTripsBoard(d); renderWatchersBoard(d); } else { renderTrips(d); renderWatchers(d); }
   renderFeed(d); renderSystem(d);
-  $("foot").textContent = `TailWatcher ${d.version} · times in ${d.time_zone.replace("_", " ")} · updates every 20 s`;
+  $("foot").innerHTML = `TailWatcher ${esc(d.version)} · times in ${esc(d.time_zone.replace("_", " "))} · updates every 20 s · <button type="button" class="linkbtn" data-act="help">Help</button>`;
 }
 
 async function load() {

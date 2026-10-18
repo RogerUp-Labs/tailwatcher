@@ -45,6 +45,8 @@ class EditsTest(unittest.TestCase):
         self.assertNotEqual(topic, edits.new_topic("Mom & Dad"))       # random every time
         edits.save_watcher(self.cfg, topic, "Parents", "")             # editing keeps it
         self.assertEqual(self.read()["watchers"][1]["topic"], topic)
+        edits.save_watcher(self.cfg, topic, "Parents", topic, new_topic_requested=True)
+        self.assertRegex(self.read()["watchers"][1]["topic"], r"^tw-parents-[a-z2-9]{20}$")
 
     def test_watcher_validation(self):
         with self.assertRaisesRegex(edits.EditError, "already uses"):

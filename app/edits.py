@@ -50,14 +50,15 @@ def _find(raw, topic):
     return next((w for w in raw.get("watchers") or [] if w.get("topic") == topic), None)
 
 
-def save_watcher(path, original, name, topic, priority="default", notify_landing=False, trips_path=None):
+def save_watcher(path, original, name, topic, priority="default", notify_landing=False, trips_path=None,
+                 new_topic_requested=False):
     """Add a watcher (original=None) or update the one whose topic is `original`.
     A blank topic gets a new unguessable one (new watchers) or stays as it was."""
     name, topic = (name or "").strip()[:40], (topic or "").strip()
     if not name:
         raise EditError("Give the watcher a name.")
-    if not topic:
-        topic = original or new_topic(name)
+    if new_topic_requested or not topic:
+        topic = new_topic(name) if new_topic_requested or not original else original
     if not TOPIC_RE.match(topic):
         raise EditError("The topic can only use letters, numbers, underscores and hyphens.")
     if priority not in PRIORITIES:

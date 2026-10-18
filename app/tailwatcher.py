@@ -41,7 +41,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.13.0"
+VERSION = "0.14.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
@@ -894,7 +894,8 @@ def run():
                 if op == "save":
                     msg = edits.save_watcher(CONFIG_PATH, data.get("original") or None, data.get("name"),
                                              data.get("topic"), data.get("priority") or "default",
-                                             bool(data.get("notifyLanding")))
+                                             bool(data.get("notifyLanding")),
+                                             new_topic_requested=bool(data.get("newTopic")))
                 elif op == "remove":
                     msg = edits.remove_watcher(CONFIG_PATH, topic)
                 else:

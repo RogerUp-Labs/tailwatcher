@@ -10,6 +10,7 @@ COPY --from=airports /build/airports.csv /app/airports.csv
 COPY app/tailwatcher.py app/commands.py app/flights.py app/lookup.py app/trips.py app/history.py app/web.py app/edits.py app/ntfy_admin.py /app/
 COPY app/web/ /app/web/
 COPY icon.svg /app/web/icon.svg
+COPY instructions.md /app/web/guide.md
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 CMD ["python", "/app/tailwatcher.py"]

@@ -1,146 +1,179 @@
 # TailWatcher
 
-TailWatcher sends a push notification, through NTFY on this server, when an aircraft someone follows takes off. Each **watcher** is one person with their own NTFY topic and their own list of tail numbers and flight numbers.
+TailWatcher sends push notifications to the people in your household when a plane they care about takes off or lands: a family member's flight, a friend's Cessna, or the plane flying in for your next trip. It works with any airline or aircraft, using free public ADS-B data, and delivers alerts through the free **ntfy** app.
 
-## Setup
+## Getting started
 
-1. **Open the Web UI** and tap **+ Add watcher** for each person who should get alerts. Just a name; TailWatcher picks an unguessable notification topic for them.
-2. Tap **Connect phone** on a watcher. Send them the link (or open it on their phone): they install the free **ntfy** app, tap the link, and they're subscribed.
-3. Add aircraft (**+ Aircraft**: a tail number like `N12345` or a flight like `UA1234`), or let each person text them in themselves (see Text commands).
-4. Optional: add a free **AeroDataBox** key in **Configure** so trips find the plane flying in for your flight on their own.
+1. Open TailWatcher's **Web UI** and tap **+ Add watcher** for each person who should get alerts. A name is all it needs.
+2. Tap **Connect phone** on that watcher and send them the link (see **Connecting a phone**).
+3. Add what they want to follow with **+ Aircraft**: a tail number like `N12345` or a flight number like `UA1234`. They can also text these in themselves (see **Text commands**).
+4. Optional: add a free **AeroDataBox** key in **⚙ Settings** so trips find the plane flying in for your flight on their own.
 
-That's all. No NTFY package, users or tokens are needed.
+Nothing else is needed: alerts go through the public ntfy.sh service by default, so there's no NTFY package, account or token to set up. To keep alerts on your own server instead, see **Settings and where alerts go**.
 
-### Where alerts go
+## Connecting a phone
 
-**⚙ Settings** in the Web UI (or **Configure → Notification Server**) decides:
+Each watcher has their own notification topic, a long random name that TailWatcher picks. **Connect phone** on the dashboard shows everything that person needs:
 
-- **ntfy.sh** (default, easiest): the free public ntfy service. Each watcher's topic is a long random name, which is what keeps their alerts private: anyone who knew it could read them, so don't post Connect phone links publicly. iPhones get alerts instantly this way.
-- **This server's NTFY** (private): alerts stay on your hardware. Install **NTFY**, then in TailWatcher's Web UI open **⚙ Settings**, choose **This server's NTFY**, enter NTFY's admin password and tap **Set up NTFY for me**. TailWatcher creates its own NTFY user, gives it access to the `tw-*` topics, saves a token, and sets how phones connect: **without a login** (recommended; just the Connect phone link) or **one NTFY login per person** (TailWatcher makes each account; the Connect phone dialog has a **Create NTFY login** button for people added later). The admin password is used for that setup only and never saved. Note that self-hosted NTFY can deliver to iPhones slowly.
-- **Custom**: another ntfy server, at the address you enter.
+1. Install the free **ntfy** app (Google Play, F-Droid or the App Store; the links are in the dialog).
+2. Tap the subscribe link on their phone. **Send link** shares it by text message or email; **Copy link** copies it. The ntfy app opens with their alerts ready to subscribe.
 
-TailWatcher only sends the NTFY token to your own or a custom server, never to ntfy.sh.
+If the link doesn't open the app, open the web link shown under it, or in the ntfy app tap **+**, turn on **Use another server**, and enter the server and topic shown in the dialog.
 
-## Web UI
+Keep these links private: anyone with a person's link could read their alerts.
 
-Open **TailWatcher → Web UI** (on your LAN, over Tor, or a public address if you've set one up) for a dashboard of:
+## Watching planes and flights
 
-- **Trips:** each upcoming trip with its route, departure, the plane flying in, where it is in its journey, and when TailWatcher checks next
-- **Watchers:** each person's aircraft, which are airborne right now, and links to the live map
-- **Activity:** recent alerts, replies and the text commands people sent, including any NTFY didn't accept
-- **System:** whether NTFY, text commands and trip lookups are working
+- **Tail numbers** (`N12345`, `G-ABCD`) follow one specific aircraft: a private plane, a friend's plane, a specific airliner.
+- **Flight numbers** (`UA1234`, `DL 89`) follow whichever aircraft the airline uses for that flight, which is usually what you want after booking a trip. The alert names the aircraft: **UA1234 (N38473) departed**. A flight number flies every day, so give it an end: `UA1234 for 2 days`.
+- Some airlines broadcast a callsign that differs from the flight number (Ryanair `RYR5TM`). If a flight number never alerts, use the callsign.
 
-It shows everyone's watchers and trips in one place, like an admin panel, and opens without a login. The switch in the top corner picks a look: **Modern**, or **Board**, an airport departures board where trips and aircraft sit on split-flap tiles that flip when something changes. Each browser remembers its choice. If you'd like a password (for example, if TailWatcher gets a public address), turn on **Require Web UI Password** in **Configure**; then use any username and the password from **Actions → Show Web UI Password** (**Reset Web UI Password** makes a new one). You can make changes right on the page: **+ Add trip**, **+ Add watcher**, **+ Aircraft** on a watcher, and **Edit** on any trip, watcher or aircraft (each form also has a remove button). Changes take effect within seconds and show up in the activity feed. Edits behave exactly like the text commands, so a trip added on the page gets the same AeroDataBox lookup and alerts. The NTFY token and AeroDataBox key stay in **Configure**.
+What the alerts mean:
+
+- **Departed:** the plane was seen on the ground, then in the air.
+- **Is airborne:** it appeared already flying after being off the radar for 20+ minutes. Many small airports have no ADS-B coverage on the ground, so this is often the first sign of a departure.
+- **Landed / likely landed** (turn on **Landing alerts** for a watcher): it touched down, or dropped off the radar below 3,000 ft.
+
+Tapping an alert opens the plane on a live map.
 
 ## Text commands
 
-Type in your topic in the NTFY app (the message bar at the bottom) and TailWatcher replies there:
+People can manage their own list by typing in their topic in the ntfy app (the message bar at the bottom). TailWatcher replies in the same conversation.
 
 | Send | Does |
 |---|---|
 | `N12345` | Watch tail number N12345 |
-| `UA1234` (or `DL 89`, `UAL1234`) | Watch a flight number, whichever aircraft flies it |
+| `UA1234` (or `DL 89`) | Watch a flight number |
 | `add N12345 Vegas trip` | Watch it with a nickname (or rename one you already watch) |
-| `UA1234 for 2 days` | Watch it, then stop automatically. Also `3d`, `12h`, `for 6 hours` |
-| `add UA1234 Mom until fri` | Watch it through Friday night (until 3am Saturday). Also `until tomorrow` |
+| `UA1234 for 2 days` | Watch it, then stop automatically. Also `3d`, `12h`, `until fri`, `until tomorrow` |
 | `remove N12345` | Stop watching |
-| `list` | Show your list, what's airborne, and time left on expiring entries |
-| `info N12345` (or `who N12345`) | Look up any aircraft: what it is, who owns it, where it is now, and a photo |
-| `info UA1234` | The same for whichever plane is flying that flight right now |
-| `inbound UA1234 N38473 dep 4:30pm` | Follow the plane flying in for your flight (see **Where's my plane?** below) |
-| `trips` | Your trips, numbered, soonest first |
-| `share 1 Mom & Dad` / `unshare 1 Mom & Dad` | Send another watcher your flight's departure and landing for trip 1 (or stop) |
-| `change 1 AA5678` · `change 1 dep 5:10pm` · `change 1 N38473` · `change 1 11/15` · `change 1 from DFW` | Update trip 1: new flight number, departure time, plane, date or airport |
-| `cancel 1` | Stop tracking trip 1 (or `cancel AA1234`) |
+| `list` | Your list, what's airborne, and time left on expiring entries |
+| `info N12345` | Look up any aircraft: what it is, who owns it, where it is now |
+| `inbound UA1234 N38473 dep 4:30pm` | Follow the plane flying in for your flight |
+| `trips` | Your trips, numbered |
+| `change 1 AA5678` | Update trip 1: a new flight number, `dep 5:10pm`, a plane, a date `11/15` or `from DFW` |
+| `share 1 Mom & Dad` | Send another watcher your flight's departure and landing (`unshare` to stop) |
+| `cancel 1` | Stop tracking trip 1 |
 | `help` | Show the commands |
 
-A plane you add is checked right away; if it's already flying, you get the "airborne" alert within seconds. Sending an entry you already watch with a new expiry (`UA1234 for 3d`) updates it. When an entry expires, TailWatcher removes it and posts "⌛ Stopped watching UA1234 (expired)". "until" uses the **Time Zone** set in Configure. Changes show up in **Configure** too. Each person can only change their own list, since they can only post to their own topic. Turn this off with **Text Commands** in Configure.
+A plane you add is checked right away; if it's already flying, the "airborne" alert arrives within seconds. Entries with an end date remove themselves ("⌛ Stopped watching UA1234"). Each person can only change their own list. Text commands can be turned off in **⚙ Settings**.
 
-## Flight numbers
+## Trips: where's my plane?
 
-Airlines pick the aircraft for a flight on the day, so after booking a trip, watch the flight number instead of a tail. TailWatcher looks it up by the callsign the airline broadcasts (UA1234 → UAL1234) and the alert names the aircraft flying it: **UA1234 (N38473) departed**.
+Before a flight, the plane you'll fly on is usually still finishing an earlier flight somewhere else. If that runs late, so does yours. A trip follows that plane and tells you:
 
-- Type flight numbers the way they appear on your ticket: `UA1234`, `DL 89`, `B6 123`. Major US and international airlines are recognized; for others, type the ICAO callsign directly (`UAL1234`).
-- Some airlines (Ryanair, easyJet) broadcast callsigns that differ from the flight number, like `RYR5TM`. Use that callsign if the flight number doesn't alert.
-- A flight number is watched every day it flies, so give trips an expiry: `UA1234 for 2 days`.
-- How TailWatcher tells them apart: a registration with a dash (`G-ABCD`, `B-6123`) or a US N-number (`N12345`) is always a tail. A known airline code followed by 1–4 digits (`UA1234`), or any three letters followed by digits (`UAL1234`), is a flight. Anything else is a tail (`JA8089`).
+- ✈️ when it's on its way to your airport, with an arrival estimate and how long that leaves before your departure
+- ⏳ / ⚠️ if it will land within 45, then 20, minutes of your departure, and 🧳 if it's running 15+ minutes later than announced
+- 🛬 when it lands at your airport, or that it's already there
+- 🧳 if it's flying an earlier flight first
 
-## Looking up a plane
+**Add a trip** with **+ Add trip** on the dashboard, or by text:
 
-`info` works for any aircraft, watched or not. A reply looks like:
+- **Without an AeroDataBox key**, say which plane it is. Your airline app usually shows it under "Where's my plane?": `inbound UA1234 N38473 dep 4:30pm` (or the inbound flight number instead of the tail). Add `tomorrow`, a date `10/20` and `from IAD` if needed.
+- **With an AeroDataBox key**, `inbound UA1234 11/14` is enough. TailWatcher looks up your departure time, finds the assigned plane once the airline picks one, and tells you if the plane or your time changes. It checks weekly when the trip is far off, daily in the last two weeks, and four times on the last day: about 20 of the free plan's 400 monthly requests for a trip booked a month ahead.
 
-> 🔎 N172SP
-> Cessna R172K (1977)
-> Owner: Luke Airlines LLC · Southgate, Michigan
-> Registration: valid, expires 08/31/2028
-> Engine: Continental IO-360 (piston)
-> Live: ✈️ 4,500 ft · 110 kt · 10 nm NW of KFDK
-> Send N172SP to watch it.
+**If the airline renumbers or cancels your flight**, TailWatcher notices on its next check, tells you, and suggests the likely new flight number. Reply with the `change` it suggests to switch; it never switches by itself.
 
-with a photo when planespotters.net has one, and buttons for ADS-B Exchange, the FAA record and the photo page.
-
-- **Owner details** come from the FAA registry, so they're US aircraft (N-numbers) only. The reply shows city and state; the **FAA record** button has the full public record. Non-US aircraft show the operator from hexdb.io instead.
-- **Flags** show when an aircraft is military, on adsb.lol's "interesting" list, or hidden from FlightAware and Flightradar24 (FAA LADD).
-- Owners can be companies or trusts set up to keep their name private, and the FAA's privacy (PIA) program hides some aircraft altogether.
-
-## Where's my plane?
-
-Before a flight, the plane you'll fly on is usually still finishing its previous flight somewhere else. If that flight runs late, so will yours. TailWatcher can follow that plane and tell you:
-
-- ✈️ when it **takes off toward your airport**, with an arrival estimate and how much time that leaves before your departure
-- ⏳ / ⚠️ if its arrival gets **within 45 minutes**, then **20 minutes**, of your departure, and 🧳 if it's **running 15+ minutes later** than last announced
-- 🛬 when it **lands** at your airport (or that it's already there)
-- 🧳 if it's flying an **earlier flight** first, so you know where it is
-
-**Without an AeroDataBox key**, tell TailWatcher which plane it is. Your airline app usually shows it under "Where's my plane?", as a tail number or the flight it's arriving on:
-
-`inbound UA1234 N38473 dep 4:30pm` · `inbound UA1234 UA567 dep 4:30pm tomorrow from IAD`
-
-Your flight comes first, then the plane, your departure time, and optionally `tomorrow` or a date (`10/20`) and your airport (`from IAD`). Without `from`, TailWatcher works out your airport from where the plane is flying.
-
-**With an AeroDataBox key** (free; see Configure), `inbound UA1234` is enough. Add `tomorrow` or a date for later trips, e.g. `inbound AA1234 11/14`, and `from IAD` if the flight number makes more than one stop. TailWatcher looks up your departure time, then the plane assigned to your flight and the flight it arrives on once the airline assigns one, and tells you if the plane or your departure time changes.
-
-How often it checks, to stay well inside the free plan's 400 requests a month:
-- **More than 2 weeks out:** once a week (1 request): is the flight still listed, and when does it leave?
-- **2 weeks to 1 day out:** once a day (1 request).
-- **The last day:** about 24 h, 6 h, 2 h and 45 min before departure (2 requests each), to find the assigned plane and its inbound flight.
-
-A trip added a month ahead uses about 20 requests in all.
-
-**If the airline renumbers or cancels your flight**, AeroDataBox stops listing it. TailWatcher notices on its next check and tells you. It also searches your airport's departures around the original time for the same airline to the same destination. If it finds a likely match, the message says e.g. "Looks like it's now AA5678, departing 4:10pm to KDFW. Reply \"change 2 AA5678\" to switch." It never switches on its own, so it can't end up following the wrong flight.
-
-Arrival estimates come from the plane's live position and speed, so treat them as a heads-up rather than the airline's official time. Times are shown in the time zone set in Configure. Trips clear themselves a few hours after departure.
+Arrival estimates come from the plane's live position and speed, so treat them as an early warning rather than the airline's official time. Trips clear themselves a few hours after departure.
 
 ## Sharing a trip with family
 
-Your trip alerts are about the plane flying in to pick *you* up. Family usually just wants to know when your flight leaves and lands. **Share** the trip with them: tick their names under **Share with** when adding or editing a trip on the dashboard, or text `share 1 Mom & Dad` (the trip number from `trips`, then their watcher name).
+Your trip alerts are about the plane coming to get *you*; family usually wants to know when your flight leaves and lands. Tick their names under **Share with** on the trip form, or text `share 1 Mom & Dad`.
 
-They need their own watcher (with the ntfy app on their phone, subscribed to their topic), but no extra topic: shared flights arrive on it like anything else. They get:
+They get a note that you shared a flight, a heads-up if the time changes or the flight disappears (with an AeroDataBox key), and departure and landing alerts on the day. They don't get your inbound-plane updates. TailWatcher follows your flight only around departure, so a flight shared weeks ahead won't alert on the other days it flies. Changing or cancelling the trip updates them too.
 
-- 📣 a note right away that you've shared a flight with them
-- 🕓 / ⚠️ a heads-up if the departure time changes or the flight disappears (renumbered or cancelled), when you have an AeroDataBox key
-- ✈️ a departure alert and 🛬 a landing alert on the day, with a live-map button
+## Looking up a plane
 
-They don't get your inbound-plane updates. TailWatcher only follows your flight from a few hours before departure, so a flight number shared weeks ahead doesn't alert on the other days it flies. If you change the trip (new flight number, date or time), their alerts follow; cancelling the trip stops them.
+`info N12345` works for any aircraft, watched or not, and replies with what it is, its owner and registration (US N-numbers, from the FAA registry: city and state only; the **FAA record** button has the rest), its engine, where it is right now, and a photo when one exists. `info UA1234` looks up whichever plane is flying that flight right now. Flags show military aircraft and planes hidden from FlightAware and Flightradar24.
 
-## Adding another person
+## Using the dashboard
 
-1. **+ Add watcher** "Dad" on the Web UI, then **Connect phone** and send him the link.
-2. Add his aircraft, or leave the list empty and let him text tail numbers in. Several watchers can follow the same aircraft, and each can give it their own nickname. It's still checked only once.
-With this server's NTFY and logins required, also create an NTFY user for him with Read-Write on his topic.
+The Web UI shows everyone's watchers and trips in one place:
 
-## When you get an alert
+- **Trips:** route, departure, the plane flying in, how far along it is, and when TailWatcher checks next
+- **Watchers:** each person's planes and flights, what's airborne now, and live-map links
+- **Activity:** recent alerts, replies, text commands and edits
+- **System:** whether notifications, text commands and trip lookups are working
 
-- **Departed:** the aircraft was seen on the ground, then in the air.
-- **Is airborne:** it appeared already flying after being off the radar for 20+ minutes. Many small airports have no ADS-B coverage at ground level, so this is often the first sign of a departure.
-- **Landed / likely landed** (optional, per watcher): it touched down, or dropped off the radar below 3,000 ft.
+Add and change things right on the page: **+ Add trip**, **+ Add watcher**, **+ Aircraft**, and **Edit** on any trip, watcher or aircraft. The switch in the top corner picks a look, **Modern** or **Board** (an airport departures board with split-flap tiles), and each browser remembers it. **? Help** opens this guide.
 
-Tapping the alert opens the aircraft live on ADS-B Exchange (or adsb.lol, set in Configure).
+## Settings and where alerts go
+
+**⚙ Settings** on the dashboard (or **Configure** in StartOS) holds:
+
+- **Notification server**
+    - **ntfy.sh** (default): the free public ntfy service. Nothing to install. Each person's topic is a long random name, which is what keeps their alerts private. iPhones get alerts instantly.
+    - **This server's NTFY**: alerts stay on your hardware. Install NTFY, choose this option, enter NTFY's admin password and tap **Set up NTFY for me**. TailWatcher sets up its own NTFY user and token, and phones connect either **without a login** (recommended; just the Connect phone link) or with **one NTFY login per person** (TailWatcher creates them; **Connect phone** has a **Create NTFY login** button for people added later). The admin password is used for that one step and never saved.
+    - **Another ntfy server**, at an address you enter.
+- **AeroDataBox key** (optional): for trips that find their plane automatically. Subscribe to the free Basic plan at rapidapi.com/aedbx-aedbx/api/aerodatabox and paste the key.
+- **ADS-B feed** and **Check every**: adsb.fi is the default. All planes are checked together, one request per cycle.
+- **Time zone**, **map buttons**, **text commands**, and **Require a password for this page** (get it from **Actions → Show Web UI Password**).
+
+## For people getting alerts
+
+*A short version to send to the people who get alerts. The Copy button in Help copies it.*
+
+TailWatcher sends you alerts in the ntfy app when planes you follow take off or land.
+
+- **Departed / is airborne:** the plane just took off (or just appeared in the air). Tap the alert to see it on a live map.
+- **Landed:** it's on the ground.
+- **📣 shared a flight with you:** someone added you to their trip; you'll get its departure and landing.
+
+You can type in your ntfy topic to manage your list: send a tail or flight number (`N12345`, `UA1234 for 2 days`) to follow it, `remove N12345` to stop, `list` to see your list, or `help` for everything.
+
+To stop all alerts, unsubscribe from the topic in the ntfy app. On Android, set the ntfy app's battery use to **Unrestricted** so alerts arrive on time.
+
+## Troubleshooting
+
+### I'm not getting any alerts
+
+- Run **Actions → Send Test Notification** in StartOS. If it reports a problem, the message says what to fix.
+- Check the phone is subscribed to the right topic: open **Connect phone** for that person and compare the topic with the one in their ntfy app.
+- On Android, set the ntfy app's battery use to **Unrestricted** (Settings → Apps → ntfy → Battery).
+- Look at **System** on the dashboard: "needs attention" there explains what's wrong.
+
+### Alerts arrive late on an iPhone
+
+Self-hosted NTFY can't use Apple's instant push service, so iPhones may only receive alerts when the app is opened. Use **ntfy.sh** in **⚙ Settings** for instant iPhone alerts.
+
+### A plane took off but there was no alert
+
+- ADS-B coverage comes from volunteers. Small airports often have none on the ground, so the alert comes as "is airborne" once the plane is picked up, which can be a few minutes after takeoff.
+- Check the tail or flight number with `info`. If `info` finds nothing while the plane is flying, it may not be broadcasting, or it may be in the FAA's privacy program, whose aircraft can't be tracked by tail number anywhere.
+- For a flight number, some airlines broadcast a different callsign (see **Watching planes and flights**).
+
+### "Too many requests" in System
+
+The free ADS-B feeds limit how often anyone can ask. TailWatcher switches to the other feed and backs off automatically. If it keeps happening, raise **Check every** in **⚙ Settings**.
+
+### The Connect phone link doesn't open the app
+
+Install the ntfy app first, then tap the link again. If it still doesn't open (some iPhones), use the web link under it, or add the topic by hand in the app: **+**, **Use another server**, then the server and topic shown in the dialog.
+
+### Text commands get no reply
+
+- Make sure **Text commands** is on in **⚙ Settings**.
+- With this server's NTFY, run **Set up NTFY for me** again. Watchers created before version 0.12 have `tailwatcher_…` topics, which need their old NTFY permissions or a new topic (below).
+
+### Give someone a new topic
+
+**Edit** the watcher and tick **Give them a new topic**, then send them a fresh **Connect phone** link. Their old subscription stops getting alerts.
+
+### My flight was renumbered or cancelled
+
+With an AeroDataBox key, TailWatcher tells you and suggests the new flight number; reply with the `change` it suggests. Otherwise, `change 1 NEW123` (with the trip number from `trips`) updates the flight.
+
+### AeroDataBox says the key was rejected or the quota is used up
+
+Check the key in **⚙ Settings** (paste it again to replace it). The free plan resets monthly; TailWatcher keeps tracking trips you entered by hand meanwhile.
+
+### I lost a password
+
+- **The dashboard password:** StartOS → TailWatcher → **Actions → Show Web UI Password** (or **Reset Web UI Password**).
+- **NTFY's admin password:** NTFY → **Actions → Reset User Password** → admin.
 
 ## Good to know
 
-- Data comes from free, community-run ADS-B feeds (adsb.lol or adsb.fi). Coverage depends on volunteer receivers, so remote areas can have gaps.
-- These feeds are unfiltered: aircraft that FlightAware and Flightradar24 hide under the FAA's LADD program still appear. Aircraft in the FAA's privacy (PIA) program broadcast a rotating address and can't be tracked by tail number anywhere.
-- The service's health check shows which watched aircraft are airborne right now, and reports any watcher topic that NTFY refused.
-- If NTFY is briefly unreachable, alerts are retried for 30 minutes and sent only to watchers who haven't received them yet.
-- All watched aircraft are checked together in one request per cycle (one per 25 aircraft), so watching more planes doesn't mean more requests. If a feed says "too many requests", TailWatcher uses the other feed for that check, and backs off if both refuse. adsb.lol allows only 500 requests a day, so adsb.fi is the default.
+- Data comes from free, community-run ADS-B feeds (adsb.fi and adsb.lol). They're unfiltered, so planes hidden from FlightAware and Flightradar24 (FAA LADD) still appear.
+- If NTFY is briefly unreachable, alerts are retried for 30 minutes and sent only to people who haven't received them yet.
+- TailWatcher only sends an NTFY token to your own or a custom server, never to ntfy.sh.
