@@ -1,6 +1,6 @@
 import { configJson } from '../fileModels/config.json'
 import { sdk } from '../sdk'
-import { ntfyFallbackUrl, ntfyUrl } from '../utils'
+import { ntfyFallbackUrl, ntfyUrl, publicNtfy } from '../utils'
 
 export const testNotification = sdk.Action.withoutInput(
   'test-notification',
@@ -18,7 +18,15 @@ export const testNotification = sdk.Action.withoutInput(
   async ({ effects }) => {
     const c = await configJson.read().once()
     if (!c?.watchers.length) throw new Error('Add a watcher in Configure first.')
-    const base = (await ntfyUrl(effects).once()) ?? ntfyFallbackUrl
+    // Same rules as resolve_ntfy() in app/tailwatcher.py: the token never goes to ntfy.sh.
+    const base =
+      c.ntfyServer === 'custom'
+        ? c.ntfyCustomUrl
+        : c.ntfyServer === 'local'
+          ? ((await ntfyUrl(effects).once()) ?? ntfyFallbackUrl)
+          : publicNtfy
+    const token = c.ntfyServer === 'public' ? '' : c.ntfyToken
+    if (!base) throw new Error('Set the custom server address in Configure first.')
     const hex = 'a835af'
 
     const results = await Promise.all(
@@ -28,9 +36,7 @@ export const testNotification = sdk.Action.withoutInput(
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              ...(c.ntfyToken
-                ? { Authorization: `Bearer ${c.ntfyToken}` }
-                : {}),
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
             body: JSON.stringify({
               topic: w.topic,

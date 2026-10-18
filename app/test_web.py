@@ -80,6 +80,28 @@ class WebServerTest(unittest.TestCase):
         self.assertEqual(self.get("/../../etc/passwd", "correct-horse")[0], 404)
 
 
+class PageTest(unittest.TestCase):
+    """Cheap structural checks on the single-file dashboard; 0.10/0.11 shipped
+    with JavaScript accidentally pasted into the <style> block."""
+
+    def setUp(self):
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")) as f:
+            self.page = f.read()
+        self.css = self.page[self.page.index("<style>"):self.page.index("</style>")]
+        self.js = self.page[self.page.index("<script>"):self.page.index("</script>")]
+
+    def test_no_script_in_the_stylesheet(self):
+        for marker in ("function ", "=>", "const ", "return "):
+            self.assertNotIn(marker, self.css)
+
+    def test_helpers_used_in_templates_are_defined(self):
+        import re
+        called = set(re.findall(r"\$\{([a-zA-Z_]\w*)\(", self.js))
+        defined = set(re.findall(r"(?:function\s+|const\s+)([a-zA-Z_]\w*)", self.js))
+        builtin = {"esc", "encodeURIComponent", "String", "Math", "Number", "JSON", "Date", "new"}
+        self.assertEqual(called - defined - builtin, set())
+
+
 class HistoryTest(unittest.TestCase):
     def test_ring_buffer_and_persistence(self):
         path = os.path.join(tempfile.mkdtemp(), "history.json")

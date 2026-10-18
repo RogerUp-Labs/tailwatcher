@@ -38,6 +38,14 @@ class EditsTest(unittest.TestCase):
         self.assertEqual(trips.load(self.trips), [])
         self.assertEqual(self.read()["ntfyToken"], "tk_keep")
 
+    def test_blank_topic_gets_an_unguessable_one(self):
+        edits.save_watcher(self.cfg, None, "Mom & Dad", "")
+        topic = self.read()["watchers"][1]["topic"]
+        self.assertRegex(topic, r"^tw-momdad-[a-z2-9]{20}$")
+        self.assertNotEqual(topic, edits.new_topic("Mom & Dad"))       # random every time
+        edits.save_watcher(self.cfg, topic, "Parents", "")             # editing keeps it
+        self.assertEqual(self.read()["watchers"][1]["topic"], topic)
+
     def test_watcher_validation(self):
         with self.assertRaisesRegex(edits.EditError, "already uses"):
             edits.save_watcher(self.cfg, None, "Twin", "tailwatcher_sam")

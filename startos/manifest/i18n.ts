@@ -10,5 +10,5 @@ export const long = {
 
 export const installAlert = {
   en_US:
-    'TailWatcher sends alerts through NTFY on this server. Before configuring it, in NTFY run Create User "tailwatcher", then Grant User Topic Access for tailwatcher on topic "tailwatcher*" with Read-Write. Log in to the NTFY web UI as tailwatcher and create an access token under Account → Access tokens. Then run TailWatcher → Configure, paste the token and add a watcher with your tail numbers.',
+    'Open the TailWatcher Web UI, add a watcher for each person, and use "Connect phone" to send them a one-tap link for the free ntfy app. Alerts go through the public ntfy.sh service by default; to keep them on your own hardware instead, install NTFY and pick "This server\'s NTFY" in Configure.',
 }

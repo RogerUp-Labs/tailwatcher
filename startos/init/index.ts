@@ -8,13 +8,13 @@ import { newPassword, webuiJson } from '../fileModels/webui.json'
 import { setInterfaces } from '../interfaces'
 import { versionGraph } from '../versions'
 
-/** On a fresh install, ask the user to add tail numbers and the NTFY token. */
+/** On a fresh install, point the user at adding their first watcher. */
 const configureTask = sdk.setupOnInit(async (effects, kind) => {
   if (kind !== 'install') return
   if ((await configJson.read().once())?.watchers.length) return
-  await sdk.action.createOwnTask(effects, configure, 'critical', {
+  await sdk.action.createOwnTask(effects, configure, 'important', {
     reason:
-      'Add a watcher with the tail numbers to watch, and your NTFY publisher token.',
+      'Add a watcher for each person (easiest from the Web UI), then use "Connect phone" to link their ntfy app.',
   })
 })
 

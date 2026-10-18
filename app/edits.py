@@ -7,6 +7,7 @@ as the "inbound" / "change" / "cancel" text commands (see tailwatcher.py).
 """
 
 import re
+import secrets
 import time
 
 import commands
@@ -15,6 +16,14 @@ import trips
 TOPIC_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 PRIORITIES = ("low", "default", "high", "max")
 MAX_WATCHERS = 20
+
+
+def new_topic(name):
+    """An unguessable topic like "tw-dad-k3j9…": on ntfy.sh, where anyone can
+    read any topic, the name is the only lock, so 20 random characters."""
+    slug = re.sub(r"[^a-z0-9]+", "", (name or "").lower())[:12] or "watcher"
+    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+    return f"tw-{slug}-" + "".join(secrets.choice(alphabet) for _ in range(20))
 
 
 class EditError(Exception):
@@ -26,10 +35,13 @@ def _find(raw, topic):
 
 
 def save_watcher(path, original, name, topic, priority="default", notify_landing=False, trips_path=None):
-    """Add a watcher (original=None) or update the one whose topic is `original`."""
+    """Add a watcher (original=None) or update the one whose topic is `original`.
+    A blank topic gets a new unguessable one (new watchers) or stays as it was."""
     name, topic = (name or "").strip()[:40], (topic or "").strip()
     if not name:
         raise EditError("Give the watcher a name.")
+    if not topic:
+        topic = original or new_topic(name)
     if not TOPIC_RE.match(topic):
         raise EditError("The topic can only use letters, numbers, underscores and hyphens.")
     if priority not in PRIORITIES:

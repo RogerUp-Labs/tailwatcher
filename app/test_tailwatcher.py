@@ -154,6 +154,28 @@ class MatchTest(unittest.TestCase):
         self.assertEqual(tw.pick_match(data, "N2")["hex"], "3")
 
 
+class NtfyServerTest(unittest.TestCase):
+    def test_modes(self):
+        env = {"NTFY_URL": "http://10.0.3.5:80", "NTFY_PHONE_URL": "https://ntfy.home.example"}
+        self.assertEqual(tw.resolve_ntfy({"ntfy_server": "public", "ntfy_token": "tk_x"}, env),
+                         ("https://ntfy.sh", "", "https://ntfy.sh"))               # never send the token to ntfy.sh
+        self.assertEqual(tw.resolve_ntfy({"ntfy_server": "local", "ntfy_token": "tk_x"}, env),
+                         ("http://10.0.3.5:80", "tk_x", "https://ntfy.home.example"))
+        self.assertEqual(tw.resolve_ntfy({"ntfy_server": "custom", "ntfy_custom_url": "https://n.example",
+                                          "ntfy_token": ""}, env), ("https://n.example", "", "https://n.example"))
+
+    def test_defaults(self):
+        import json, tempfile
+        def cfg(data):
+            f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+            json.dump(data, f)
+            f.close()
+            return tw.load_config(f.name)
+        self.assertEqual(tw.load_config("/nonexistent")["ntfy_server"], "public")    # new installs
+        self.assertEqual(cfg({"ntfyToken": "tk_old"})["ntfy_server"], "local")        # pre-0.12 installs
+        self.assertEqual(cfg({"ntfyServer": "public", "ntfyToken": "tk"})["ntfy_server"], "public")
+
+
 class BatchPollTest(unittest.TestCase):
     def test_one_request_per_25_keys(self):
         urls = []

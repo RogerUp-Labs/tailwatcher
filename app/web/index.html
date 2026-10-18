@@ -202,17 +202,6 @@ footer { color: var(--text-3); font-size: 12px; text-align: center; margin-top: 
   .t-who { margin-left: 0; width: 100%; }
 }
 
-/* ---------- shared trips ---------- */
-function followWhen(f) {
-  const when = f.dep_time ? `${fmtDay(f.dep_time)} ${fmtTime(f.dep_time)}` : fmtDate(f.date);
-  const state = f.landed ? " · landed" : f.departed ? " · in the air" : "";
-  return `${when}${f.dep_airport ? " from " + esc(apt(f.dep_airport)) : ""}${state}`;
-}
-function followingHtml(w) {
-  if (!w.following || !w.following.length) return "";
-  return `<div class="following">${w.following.map((f) => `<div>📣 Following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}</div>`;
-}
-
 /* ---------- editing ---------- */
 .btn { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }
 .btn:hover { border-color: var(--text-3); }
@@ -245,6 +234,12 @@ dialog h3 { margin: 0 0 2px; font-size: 17px; }
 .following { padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-2); display: grid; gap: 2px; }
 .following b { color: var(--text); font-family: var(--mono); }
 .form-error { color: var(--bad); font-size: 13px; white-space: pre-line; }
+.connect ol { margin: 0; padding-left: 20px; display: grid; gap: 12px; font-size: 14px; color: var(--text); }
+.connect .stores { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.connect .stores a { font-size: 13px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; }
+.connect .bigLink { display: block; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: var(--brand-soft); color: var(--brand); font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; font-weight: 600; }
+.connect .row-btns { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.connect .note { font-size: 12.5px; color: var(--text-3); margin-top: 4px; }
 .form-error:empty { display: none; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 4px; }
 .toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%) translateY(20px); opacity: 0; transition: .25s; background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; max-width: calc(100vw - 32px); white-space: pre-line; z-index: 20; pointer-events: none; }
@@ -428,6 +423,7 @@ function renderWatchers(d) {
         <div class="w-tags">
           ${w.priority !== "default" ? `<span class="tag accent">${esc(w.priority)} priority</span>` : ""}
           ${w.notify_landing ? `<span class="tag">landings</span>` : ""}
+          <button type="button" class="linkbtn" data-act="connect" data-topic="${esc(w.topic)}">Connect phone</button>
           <button type="button" class="linkbtn" data-act="add-aircraft" data-topic="${esc(w.topic)}">+ Aircraft</button>
           <button type="button" class="linkbtn" data-act="edit-watcher" data-topic="${esc(w.topic)}">Edit</button>
         </div>
@@ -636,12 +632,23 @@ function renderWatchersBoard(d) {
         <div class="flap-sub">${bits.join(" · ")}</div>`;
     }).join("");
     return `<div class="flap-group">${esc(w.name)} <small>${esc(w.topic)}</small>${w.priority !== "default" ? ` <span class="tag accent">${esc(w.priority)}</span>` : ""}
-        <span style="margin-left:auto;display:flex;gap:12px"><button type="button" class="linkbtn" data-act="add-aircraft" data-topic="${esc(w.topic)}">+ aircraft</button><button type="button" class="linkbtn" data-act="edit-watcher" data-topic="${esc(w.topic)}">edit</button></span></div>
+        <span style="margin-left:auto;display:flex;gap:12px"><button type="button" class="linkbtn" data-act="connect" data-topic="${esc(w.topic)}">connect phone</button><button type="button" class="linkbtn" data-act="add-aircraft" data-topic="${esc(w.topic)}">+ aircraft</button><button type="button" class="linkbtn" data-act="edit-watcher" data-topic="${esc(w.topic)}">edit</button></span></div>
       ${(w.following || []).map((f) => `<div class="flap-sub">📣 following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}
       ${rows || (w.following && w.following.length ? "" : `<div class="flap-sub">No aircraft yet. Text a tail number to <code>${esc(w.topic)}</code>.</div>`)}`;
   }).join("");
   $("watchers").innerHTML = `<div class="card flap-board">
     <div class="flap-head cols-fleet"><span>Aircraft</span><span>Alt</span><span>Status</span></div>${groups}</div>`;
+}
+
+/* ---------- shared trips ---------- */
+function followWhen(f) {
+  const when = f.dep_time ? `${fmtDay(f.dep_time)} ${fmtTime(f.dep_time)}` : fmtDate(f.date);
+  const state = f.landed ? " · landed" : f.departed ? " · in the air" : "";
+  return `${when}${f.dep_airport ? " from " + esc(apt(f.dep_airport)) : ""}${state}`;
+}
+function followingHtml(w) {
+  if (!w.following || !w.following.length) return "";
+  return `<div class="following">${w.following.map((f) => `<div>📣 Following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}</div>`;
 }
 
 /* ---------- shared trips ---------- */
@@ -765,20 +772,20 @@ function watcherForm(w) {
   openForm({title: w ? `Edit ${w.name}` : "Add watcher", saveLabel: w ? "Save" : "Add watcher",
     fields: [
       {name: "name", label: "Name", value: w ? w.name : "", placeholder: "Dad", required: true, caps: false},
-      {name: "topic", label: "NTFY topic", value: w ? w.topic : "", placeholder: "tailwatcher_dad", required: true, caps: false,
-       hint: "Start it with tailwatcher so TailWatcher's token covers it. In NTFY, give this person Read-Write on it."},
+      {name: "topic", label: "NTFY topic", value: w ? w.topic : "", placeholder: "Leave blank to make one", caps: false,
+       hint: w ? "Changing it means reconnecting their phone." : "Blank is best: TailWatcher picks an unguessable topic. Then use Connect phone."},
       [{name: "priority", label: "Priority", type: "select", value: w ? w.priority : "default",
         options: [["low", "Low"], ["default", "Default"], ["high", "High"], ["max", "Max"]]},
        {name: "notifyLanding", label: "Landing alerts too", type: "check", value: w ? w.notify_landing : false}],
     ],
-    save: (v) => api("api/watcher", {op: "save", original: w ? w.topic : null, ...v}),
+    save: async (v) => {
+      const r = await api("api/watcher", {op: "save", original: w ? w.topic : null, ...v});
+      if (r.ok && !w) r.message += " Next: Connect phone.";
+      return r;
+    },
     remove: w ? {label: "Remove watcher", confirm: `Remove ${w.name}, their aircraft and their trips?`,
       run: () => api("api/watcher", {op: "remove", topic: w.topic})} : null});
-  if (!w) {
-    const name = $("f-name"), topic = $("f-topic");
-    name.addEventListener("input", () => { if (!topic.dataset.touched) topic.value = name.value ? "tailwatcher_" + slug(name.value) : ""; });
-    topic.addEventListener("input", () => { topic.dataset.touched = "1"; });
-  }
+
 }
 
 function aircraftForm(w, a) {
@@ -792,6 +799,57 @@ function aircraftForm(w, a) {
     save: (v) => api("api/aircraft", {op: "save", topic: w.topic, original: a ? a.ident : null, ...v}),
     remove: a ? {label: "Remove", confirm: `Stop watching ${a.ident}?`,
       run: () => api("api/aircraft", {op: "remove", topic: w.topic, ident: a.ident})} : null});
+}
+
+function connectInfo(w) {
+  const s = LAST.settings;
+  const base = (s.phone_url || "").replace(/\/+$/, "");
+  if (!base) return null;
+  const u = new URL(base);
+  const secure = u.protocol === "https:";
+  const app = `ntfy://${u.host}${u.pathname.replace(/\/$/, "")}/${encodeURIComponent(w.topic)}${secure ? "" : "?secure=false"}`;
+  const web = `${base}/${encodeURIComponent(w.topic)}`;
+  return {app, web, host: u.host};
+}
+
+function connectPhone(w) {
+  const info = connectInfo(w), local = LAST.settings.ntfy_server === "local";
+  const form = $("dlg-form");
+  const message = info ? `Get flight alerts from TailWatcher: install the free ntfy app, then tap this link on your phone: ${info.app}` : "";
+  form.innerHTML = `<h3 id="dlg-title">Connect ${esc(w.name)}'s phone</h3>
+    <div class="connect"><ol>
+      <li>Install the free <b>ntfy</b> app on their phone.
+        <div class="stores">
+          <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener noreferrer">Google Play</a>
+          <a href="https://f-droid.org/packages/io.heckel.ntfy/" target="_blank" rel="noopener noreferrer">F-Droid</a>
+          <a href="https://apps.apple.com/us/app/ntfy/id1625396347" target="_blank" rel="noopener noreferrer">App Store</a>
+        </div></li>
+      ${info ? `<li>On their phone, tap this link. The ntfy app opens with ${esc(w.name)}'s alerts ready to subscribe:
+        <a class="bigLink" href="${esc(info.app)}">${esc(info.app)}</a>
+        <div class="row-btns">
+          <button type="button" class="btn primary" id="cp-share">Send link</button>
+          <button type="button" class="btn" id="cp-copy">Copy link</button>
+        </div>
+        <div class="note">No app link support? Open <a href="${esc(info.web)}" target="_blank" rel="noopener noreferrer">${esc(info.web)}</a>, or in the app tap + and enter server <b>${esc(info.host)}</b> and topic <b>${esc(w.topic)}</b>.</div></li>`
+      : `<li>In the ntfy app, tap +, turn on "Use another server", enter your NTFY's address, and subscribe to <b>${esc(w.topic)}</b>.
+        <div class="note">TailWatcher can't see an address phones can use for your NTFY. Give NTFY a public or LAN address in StartOS, and this becomes a one-tap link.</div></li>`}
+      ${local ? `<li class="note">Using this server's NTFY: if it asks for a login, either log in as this person, or once in NTFY run "Set Anonymous Topic Access" for <b>tw-*</b> with Read-Write.</li>` : ""}
+      ${LAST.settings.text_commands ? `<li>They can also type in that topic to manage their list. "help" shows the commands.</li>` : ""}
+    </ol></div>
+    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Done</button></div>`;
+  form.onsubmit = (e) => e.preventDefault();
+  $("dlg-cancel").onclick = () => $("dlg").close();
+  if (info) {
+    $("cp-copy").onclick = async () => {
+      try { await navigator.clipboard.writeText(info.app); toast("Link copied."); }
+      catch (e) { toast("Couldn't copy. Press and hold the link instead."); }
+    };
+    $("cp-share").onclick = async () => {
+      if (navigator.share) { try { await navigator.share({title: "TailWatcher alerts", text: message}); } catch (e) { /* cancelled */ } }
+      else { try { await navigator.clipboard.writeText(message); toast("Message copied. Paste it into a text to them."); } catch (e) { toast("Copy the link above and text it to them."); } }
+    };
+  }
+  $("dlg").showModal();
 }
 
 function onAction(btn) {
@@ -809,6 +867,7 @@ function onAction(btn) {
     return;
   }
   if (act === "add-watcher") return watcherForm(null);
+  if (act === "connect" && w) return connectPhone(w);
   if (act === "edit-watcher" && w) return watcherForm(w);
   if (act === "add-aircraft" && w) return aircraftForm(w, null);
   if (act === "edit-aircraft" && w) return aircraftForm(w, w.aircraft.find((a) => a.ident === ident));

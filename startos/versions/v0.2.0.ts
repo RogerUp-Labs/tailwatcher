@@ -36,6 +36,8 @@ export const v0_2_0 = VersionInfo.of({
         timeZone: 'America/New_York',
         aerodataboxKey: '',
         webPassword: false,
+        ntfyServer: 'local',
+        ntfyCustomUrl: '',
       })
     },
     down: IMPOSSIBLE,

@@ -4,18 +4,22 @@ TailWatcher sends a push notification, through NTFY on this server, when an airc
 
 ## Setup
 
-1. **Give TailWatcher its own NTFY user and token.**
-   1. **NTFY → Actions → Create User**, username `tailwatcher`. Copy the password it shows.
-   2. **NTFY → Actions → Grant User Topic Access**: user `tailwatcher`, topic **Enter New** `tailwatcher*`, permission **Read-Write**. The `*` covers every watcher's topic (`tailwatcher`, `tailwatcher_dad`, …), and Read-Write lets TailWatcher both send alerts and read text commands.
-   3. Open the **NTFY web UI** (a private browser window is easiest), log in as `tailwatcher`, go to **Account → Access tokens → Create access token**, set it to never expire, and copy the token (`tk_…`).
+1. **Open the Web UI** and tap **+ Add watcher** for each person who should get alerts. Just a name; TailWatcher picks an unguessable notification topic for them.
+2. Tap **Connect phone** on a watcher. Send them the link (or open it on their phone): they install the free **ntfy** app, tap the link, and they're subscribed.
+3. Add aircraft (**+ Aircraft**: a tail number like `N12345` or a flight like `UA1234`), or let each person text them in themselves (see Text commands).
+4. Optional: add a free **AeroDataBox** key in **Configure** so trips find the plane flying in for your flight on their own.
 
-   (NTFY's **Provision Publisher** action creates a send-only account that can't be given read access, so it works for alerts but not for text commands.)
-2. **Configure TailWatcher.** Open **TailWatcher → Actions → Configure**, paste the **token**, and add a watcher:
-   - **Name**, e.g. `Sam`
-   - **NTFY Topic**, e.g. `tailwatcher_sam`
-   - **Aircraft:** each tail number (e.g. `N12345`) or flight number (e.g. `UA1234`, with **Type** set to Flight number), with an optional nickname and an optional **Stop Watching After** (days)
-3. **Subscribe on the phone.** In the NTFY Android app, add your server, log in, and subscribe to the watcher's topic.
-4. Run **TailWatcher → Actions → Send Test Notification**. It sends to every watcher's topic and shows which ones worked.
+That's all. No NTFY package, users or tokens are needed.
+
+### Where alerts go
+
+**Configure → Notification Server** decides:
+
+- **ntfy.sh** (default, easiest): the free public ntfy service. Each watcher's topic is a long random name, which is what keeps their alerts private: anyone who knew it could read them, so don't post Connect phone links publicly. iPhones get alerts instantly this way.
+- **This server's NTFY** (private): alerts stay on your hardware. Install **NTFY**, then in NTFY run **Set Anonymous Topic Access** once for topic `tw-*` with **Read-Write**. If your NTFY should require logins instead, give TailWatcher a token in Configure and each person a user (see NTFY's own instructions). Note that self-hosted NTFY can deliver to iPhones slowly.
+- **Custom**: another ntfy server, at the address you enter.
+
+TailWatcher only sends the NTFY token to your own or a custom server, never to ntfy.sh.
 
 ## Web UI
 
@@ -121,11 +125,9 @@ They don't get your inbound-plane updates. TailWatcher only follows your flight 
 
 ## Adding another person
 
-1. **In NTFY:** run **Create User** (e.g. `dad`) and save the password. Then run **Grant User Topic Access** with user `dad`, topic `tailwatcher_dad`, permission **Read-Write** (or **Read Only** if they shouldn't use text commands). They can only use their own topic.
-2. **In TailWatcher → Configure:** add a watcher named `Dad` with topic `tailwatcher_dad`. Add their aircraft there, or leave the list empty and let them text tail numbers in. Several watchers can follow the same aircraft, and each can give it their own nickname. It's still checked only once.
-3. **On their phone:** the NTFY app, logged in as `dad`, subscribed to `tailwatcher_dad`.
-
-No new token is needed as long as the topic starts with `tailwatcher`.
+1. **+ Add watcher** "Dad" on the Web UI, then **Connect phone** and send him the link.
+2. Add his aircraft, or leave the list empty and let him text tail numbers in. Several watchers can follow the same aircraft, and each can give it their own nickname. It's still checked only once.
+With this server's NTFY and logins required, also create an NTFY user for him with Read-Write on his topic.
 
 ## When you get an alert
 

@@ -9,7 +9,10 @@ polled once however many watchers follow it. Standard library only.
 Config:  $TW_CONFIG (default /data/config.json), written by the StartOS
          Configure action.
 State:   $TW_STATE (default /data/state.json), so restarts don't re-alert.
-Env:     NTFY_URL  base URL of the ntfy server (e.g. http://10.0.3.5:80)
+Env:     NTFY_URL        this Start9's NTFY on the internal network (e.g. http://10.0.3.5:80)
+         NTFY_PHONE_URL  the address phones use for that NTFY (for "Connect phone" links)
+Which server is used comes from config.json "ntfyServer": public (ntfy.sh,
+the default), local (NTFY_URL) or custom ("ntfyCustomUrl").
 """
 
 import csv
@@ -37,7 +40,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.11.0"
+VERSION = "0.12.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
@@ -124,6 +127,9 @@ def load_config(path=CONFIG_PATH, now=None):
         "data_source": raw.get("dataSource") or "adsb.fi",
         "text_commands": bool(raw.get("textCommands", True)),
         "time_zone": raw.get("timeZone") or commands.DEFAULT_TZ,
+        # Installs from before 0.12 used this server's NTFY with a token.
+        "ntfy_server": raw.get("ntfyServer") or ("local" if raw.get("ntfyToken") else "public"),
+        "ntfy_custom_url": (raw.get("ntfyCustomUrl") or "").strip(),
         "adb_key": (raw.get("aerodataboxKey") or "").strip(),
         "web_password": bool(raw.get("webPassword", False)),
     }
@@ -282,6 +288,25 @@ def build_message(cfg, watcher, tail, label, ac, event, airports, kind="tail"):
     }
 
 
+PUBLIC_NTFY = "https://ntfy.sh"
+
+
+def resolve_ntfy(cfg, env=os.environ):
+    """(url TailWatcher publishes to, token to send, address phones subscribe to).
+
+    The token is only sent to your own or a custom server, never to ntfy.sh,
+    where anonymous publishing to an unguessable topic is the whole model.
+    """
+    mode = cfg.get("ntfy_server") or "public"
+    if mode == "custom":
+        url = cfg.get("ntfy_custom_url") or ""
+        return url, cfg.get("ntfy_token") or "", url
+    if mode == "local":
+        return ((env.get("NTFY_URL") or "").strip(), cfg.get("ntfy_token") or "",
+                (env.get("NTFY_PHONE_URL") or "").strip())
+    return PUBLIC_NTFY, "", PUBLIC_NTFY
+
+
 def publish(ntfy_url, token, payload, timeout=15):
     body = json.dumps({k: v for k, v in payload.items() if v is not None}).encode()
     req = urllib.request.Request(ntfy_url.rstrip("/") + "/", data=body, method="POST")
@@ -430,7 +455,7 @@ def run():
     )
     health = Health()
     hist = history.History()
-    ntfy_url = os.environ.get("NTFY_URL", "").strip()
+    ntfy_url, ntfy_token, phone_url = resolve_ntfy(load_config())
     airports = Airports()
     state = load_state()
     retry_queue = state.pop("_retry", [])
@@ -614,7 +639,7 @@ def run():
         def record(status):
             hist.add("out", topic, payload.get("message"), payload.get("title"), message_kind(payload), status)
         try:
-            publish(ntfy_url, cfg["ntfy_token"], payload)
+            publish(ntfy_url, ntfy_token, payload)
             topic_errors.pop(topic, None)
             record("sent")
             return True
@@ -791,7 +816,8 @@ def run():
             "now": now, "version": VERSION, "time_zone": cur["time_zone"], "health": health.get(),
             "settings": {"data_source": cur["data_source"], "poll_seconds": cur["poll_seconds"],
                          "map_links": cur["map_links"], "text_commands": cur["text_commands"],
-                         "aerodatabox": bool(cur["adb_key"]), "ntfy": bool(ntfy_url),
+                         "aerodatabox": bool(cur["adb_key"]), "ntfy": bool(resolve_ntfy(cur)[0]),
+                         "ntfy_server": cur["ntfy_server"], "phone_url": resolve_ntfy(cur)[2],
                          "listening": sorted(names[k] for k in names if k not in listen_errors)},
             "watchers": watchers_out, "trips": trips_out,
             "history": [dict(e, watcher=names.get(e["topic"], e["topic"])) for e in hist.recent(150)],
@@ -899,6 +925,7 @@ def run():
             # Configure (StartOS) or a text command changed the file: apply it
             # without restarting.
             cfg_mtime, cfg = mtime, load_config()
+            ntfy_url, ntfy_token, phone_url = resolve_ntfy(cfg)
             subs = subscriptions(cfg)
             for w in cfg["watchers"]:
                 log.info("watcher %s → topic %s: %s", w["name"], w["topic"],
@@ -908,7 +935,7 @@ def run():
                      len(subs), cfg["data_source"], cfg["poll_seconds"], ntfy_url,
                      "on" if cfg["text_commands"] else "off")
             topics = [w["topic"] for w in cfg["watchers"]] if cfg["text_commands"] and ntfy_url else []
-            listeners.sync(topics, ntfy_url, cfg["ntfy_token"])
+            listeners.sync(topics, ntfy_url, ntfy_token)
 
         if not cfg["watchers"] or not ntfy_url:
             problems = [] if cfg["watchers"] else ["no watchers"]

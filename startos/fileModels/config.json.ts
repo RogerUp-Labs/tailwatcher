@@ -59,6 +59,13 @@ const shape = z.object({
   timeZone: z
     .enum(Object.keys(timeZones) as [TimeZone, ...TimeZone[]])
     .catch('America/New_York'),
+  /**
+   * Where alerts are published. public = ntfy.sh (default; no NTFY package or
+   * logins, unguessable topics are the lock), local = this server's NTFY
+   * (installs from before 0.12 are migrated to this), custom = ntfyCustomUrl.
+   */
+  ntfyServer: z.enum(['public', 'local', 'custom']).catch('public'),
+  ntfyCustomUrl: z.string().catch(''),
   /** Optional RapidAPI key for AeroDataBox; lets "inbound UA1234" find the plane itself. */
   aerodataboxKey: z.string().catch(''),
   /** Ask for the Web UI password (webui.json). Off: the dashboard is open to anyone who can reach it. */

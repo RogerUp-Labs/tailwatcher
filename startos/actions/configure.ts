@@ -1,4 +1,5 @@
 import { Aircraft, configJson, timeZones } from '../fileModels/config.json'
+import { newTopic } from '../utils'
 import { sdk } from '../sdk'
 
 const { InputSpec, Value, List } = sdk
@@ -70,8 +71,8 @@ const watcherSpec = InputSpec.of({
   topic: Value.text({
     name: 'NTFY Topic',
     description:
-      'Topic this watcher subscribes to in the NTFY app. Start it with "tailwatcher_" so TailWatcher\'s NTFY user (granted tailwatcher*) covers every watcher. In NTFY, give this person\'s user Read Only access to it.',
-    required: true,
+      'Leave blank and TailWatcher makes an unguessable one. Use "Connect phone" on the Web UI to send this person a one-tap subscribe link.',
+    required: false,
     default: null,
     placeholder: 'tailwatcher_dad',
     patterns: [
@@ -134,10 +135,30 @@ const inputSpec = InputSpec.of({
       },
     ),
   ),
+  ntfyServer: Value.select({
+    name: 'Notification Server',
+    description:
+      "- ntfy.sh: the public ntfy service. Nothing else to install or set up; each watcher gets an unguessable topic, which is what keeps their alerts private.\n- This server's NTFY: alerts stay on your hardware. Install NTFY, then in NTFY run \"Set Anonymous Topic Access\" for topic \"tw-*\" with Read-Write (or set up a token below).\n- Custom: another ntfy server, at the address below.",
+    default: 'public',
+    values: {
+      public: 'ntfy.sh (easiest)',
+      local: "This server's NTFY (private)",
+      custom: 'Custom ntfy server',
+    },
+  }),
+  ntfyCustomUrl: Value.text({
+    name: 'Custom Server Address',
+    description: 'Only for "Custom ntfy server", e.g. https://ntfy.example.com.',
+    required: false,
+    default: null,
+    placeholder: 'https://ntfy.example.com',
+    inputmode: 'url',
+    patterns: [{ regex: '^https?://\\S+$', description: 'Starts with https:// or http://' }],
+  }),
   ntfyToken: Value.text({
     name: 'NTFY Access Token',
     description:
-      'An access token for a regular NTFY user with Read-Write on "tailwatcher*". In NTFY: Create User "tailwatcher", Grant User Topic Access (tailwatcher, tailwatcher*, Read-Write), then log in to the NTFY web UI as tailwatcher and create a token under Account → Access tokens. A Provision Publisher token also works for alerts, but cannot read, so text commands need the user token.',
+      "Optional, and only used with this server's NTFY or a custom server (never sent to ntfy.sh). Needed if that server requires a login for TailWatcher's topics: a token for a regular user with Read-Write on them (made in the NTFY web UI under Account → Access tokens).",
     required: false,
     default: null,
     masked: true,
@@ -233,6 +254,7 @@ export const configure = sdk.Action.withInput(
     return {
       ...c,
       ntfyToken: c.ntfyToken || null,
+      ntfyCustomUrl: c.ntfyCustomUrl || null,
       aerodataboxKey: c.aerodataboxKey || null,
       watchers: c.watchers.map((w) => ({
         ...w,
@@ -271,18 +293,21 @@ export const configure = sdk.Action.withInput(
     }
 
     await configJson.write(effects, {
-      watchers: input.watchers.map((w) => ({
-        name: w.name.trim(),
-        topic: w.topic,
-        aircraft: w.aircraft.map((a) => ({
-          tail: norm(a.tail),
-          label: a.label?.trim() ?? '',
-          kind: a.kind,
-          expires: expiry(w.topic, a),
-        })),
-        notifyLanding: w.notifyLanding,
-        priority: w.priority,
-      })),
+      watchers: input.watchers.map((w) => {
+        const topic = w.topic?.trim() || newTopic(w.name)
+        return {
+          name: w.name.trim(),
+          topic,
+          aircraft: w.aircraft.map((a) => ({
+            tail: norm(a.tail),
+            label: a.label?.trim() ?? '',
+            kind: a.kind,
+            expires: expiry(topic, a),
+          })),
+          notifyLanding: w.notifyLanding,
+          priority: w.priority,
+        }
+      }),
       ntfyToken: input.ntfyToken ?? '',
       pollSeconds: input.pollSeconds,
       dataSource: input.dataSource,
@@ -290,6 +315,8 @@ export const configure = sdk.Action.withInput(
       textCommands: input.textCommands,
       timeZone: input.timeZone,
       aerodataboxKey: input.aerodataboxKey?.trim() ?? '',
+      ntfyServer: input.ntfyServer,
+      ntfyCustomUrl: input.ntfyCustomUrl?.trim() ?? '',
       webPassword: input.webPassword,
     })
     return null
