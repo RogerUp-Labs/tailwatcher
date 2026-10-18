@@ -14,13 +14,18 @@ const watcher = z.object({
   priority: priority.catch('default'),
 })
 
-/** Settings written by the Configure action and read by /app/tailwatcher.py. */
+/**
+ * Settings written by the Configure action and read by /app/tailwatcher.py.
+ * Text commands also edit `watchers[].aircraft` from inside the container,
+ * so keep this shape in sync with app/commands.py.
+ */
 const shape = z.object({
   watchers: z.array(watcher).catch([]),
   ntfyToken: z.string().catch(''),
   pollSeconds: z.number().catch(60),
   dataSource: z.enum(['adsb.lol', 'adsb.fi']).catch('adsb.lol'),
   mapLinks: z.enum(['adsbx', 'adsblol', 'both']).catch('adsbx'),
+  textCommands: z.boolean().catch(true),
 })
 
 export type Config = z.infer<typeof shape>

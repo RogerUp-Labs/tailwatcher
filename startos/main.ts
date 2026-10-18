@@ -3,8 +3,9 @@ import { sdk } from './sdk'
 import { healthPort, ntfyFallbackUrl, ntfyUrl } from './utils'
 
 export const main = sdk.setupMain(async ({ effects }) => {
-  // .const() restarts the service when the config or NTFY's address changes.
-  const config = await configJson.read().const(effects)
+  // The watcher hot-reloads config.json itself (text commands edit it too), so
+  // only NTFY's address restarts the service.
+  const config = await configJson.read().once()
   const ntfy = (await ntfyUrl(effects).const()) ?? ntfyFallbackUrl
   const watchers = config?.watchers ?? []
   const tails = new Set(watchers.flatMap((w) => w.aircraft.map((a) => a.tail)))

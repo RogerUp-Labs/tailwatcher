@@ -113,7 +113,8 @@ class ConfigTest(unittest.TestCase):
              "aircraft": [{"tail": "N12345", "label": "Sam's plane"}]},
             {"name": "Empty", "topic": "tailwatcher_x", "aircraft": []},
         ]}))
-        self.assertEqual([w["name"] for w in cfg["watchers"]], ["Sam", "Dad"])  # empty dropped
+        # A watcher with no aircraft yet is kept so they can text a tail to add one.
+        self.assertEqual([w["name"] for w in cfg["watchers"]], ["Sam", "Dad", "Empty"])
         subs = tw.subscriptions(cfg)
         self.assertEqual(list(subs), ["N12345", "N628TS"])
         self.assertEqual([(w["name"], label) for w, label in subs["N12345"]],

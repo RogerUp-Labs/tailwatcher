@@ -17,7 +17,6 @@ import json
 import logging
 import math
 import os
-import re
 import sys
 import threading
 import time
@@ -25,11 +24,14 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import commands
+from commands import normalize_tail
+
 CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-USER_AGENT = "TailWatcher/0.2 (+https://github.com/homebrew-gh/tailwatcher)"
+USER_AGENT = "TailWatcher/0.3 (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
     "adsb.lol": "https://api.adsb.lol/v2/reg/{reg}",
@@ -58,10 +60,6 @@ log = logging.getLogger("tailwatcher")
 # ---------------------------------------------------------------- config
 
 
-def normalize_tail(tail):
-    return re.sub(r"[^A-Z0-9]", "", tail.upper())
-
-
 def load_config(path=CONFIG_PATH):
     try:
         with open(path) as f:
@@ -88,7 +86,7 @@ def load_config(path=CONFIG_PATH):
             tail = normalize_tail(a.get("tail") or "")
             if tail:
                 aircraft.append({"tail": tail, "label": (a.get("label") or "").strip()})
-        if topic and aircraft:
+        if topic:
             watchers.append({
                 "name": (w.get("name") or topic).strip(),
                 "topic": topic,
@@ -103,6 +101,7 @@ def load_config(path=CONFIG_PATH):
         "poll_seconds": max(15, int(raw.get("pollSeconds") or 60)),
         "map_links": raw.get("mapLinks") or "adsbx",
         "data_source": raw.get("dataSource") or "adsb.lol",
+        "text_commands": bool(raw.get("textCommands", True)),
     }
 
 
@@ -278,6 +277,13 @@ def fetch_aircraft(source, tail, timeout=15):
     return matches[0]
 
 
+def config_mtime():
+    try:
+        return os.stat(CONFIG_PATH).st_mtime_ns
+    except OSError:
+        return None
+
+
 def load_state():
     try:
         with open(STATE_PATH) as f:
@@ -331,34 +337,35 @@ def run():
     )
     health = Health()
     serve_health(health)
-    cfg = load_config()
     ntfy_url = os.environ.get("NTFY_URL", "").strip()
-
-    problems = []
-    if not cfg["watchers"]:
-        problems.append("no watchers with a topic and tail numbers")
-    if not ntfy_url:
-        problems.append("ntfy not reachable")
-    if problems:
-        msg = "Not configured: " + ", ".join(problems) + ". Run the Configure action."
-        log.warning(msg)
-        health.set(False, msg)
-        while True:
-            time.sleep(3600)
-
     airports = Airports()
     state = load_state()
     retry_queue = state.pop("_retry", [])
-    subs = subscriptions(cfg)
-    for w in cfg["watchers"]:
-        log.info("watcher %s → topic %s: %s", w["name"], w["topic"],
-                 ", ".join(a["tail"] for a in w["aircraft"]))
-    log.info("polling %d aircraft via %s every %ss, ntfy %s",
-             len(subs), cfg["data_source"], cfg["poll_seconds"], ntfy_url)
+    cfg, subs, cfg_mtime = load_config(), {}, None  # (re)loaded at the top of each cycle
 
-    # Topics whose last publish was refused (bad grant/token), shown in health
-    # until a publish to that topic succeeds.
-    topic_errors = {}
+    # Topics whose last publish was refused (bad grant/token), and topics the
+    # command listener can't read; both shown in health until they recover.
+    topic_errors, listen_errors = {}, {}
+    # Set by a text command that changed the list, to poll right away.
+    wake = threading.Event()
+
+    def on_command(topic, text):
+        reply, changed = commands.apply_command(CONFIG_PATH, topic, text, status=load_state())
+        log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0] if reply else "ignored")
+        if reply:
+            send({"topic": topic, "message": reply, "tags": ["robot"], "priority": 2})
+        if changed:
+            wake.set()
+
+    def on_listen_status(topic, err):
+        if err and listen_errors.get(topic) != err:
+            log.error(err)
+        if err:
+            listen_errors[topic] = err
+        else:
+            listen_errors.pop(topic, None)
+
+    listeners = commands.Listeners(on_command, on_listen_status)
 
     def send(payload):
         """Publish once; queue transient failures for retry, record refusals."""
@@ -382,6 +389,30 @@ def run():
 
     backoff, error_streak = 0, 0
     while True:
+        mtime = config_mtime()
+        if mtime != cfg_mtime:
+            # Configure (StartOS) or a text command changed the file: apply it
+            # without restarting.
+            cfg_mtime, cfg = mtime, load_config()
+            subs = subscriptions(cfg)
+            for w in cfg["watchers"]:
+                log.info("watcher %s → topic %s: %s", w["name"], w["topic"],
+                         ", ".join(a["tail"] for a in w["aircraft"]) or "(none yet)")
+            log.info("polling %d aircraft via %s every %ss, ntfy %s, text commands %s",
+                     len(subs), cfg["data_source"], cfg["poll_seconds"], ntfy_url,
+                     "on" if cfg["text_commands"] else "off")
+            topics = [w["topic"] for w in cfg["watchers"]] if cfg["text_commands"] and ntfy_url else []
+            listeners.sync(topics, ntfy_url, cfg["ntfy_token"])
+
+        if not cfg["watchers"] or not ntfy_url:
+            problems = [] if cfg["watchers"] else ["no watchers"]
+            if not ntfy_url:
+                problems.append("NTFY not reachable")
+            health.set(False, "Not configured: " + ", ".join(problems) + ". Run the Configure action.")
+            wake.wait(10)
+            wake.clear()
+            continue
+
         started = time.time()
         errors, airborne, rate_limited = [], [], False
 
@@ -431,17 +462,25 @@ def run():
         if errors:
             log.warning("poll errors: %s%s", "; ".join(errors),
                         f" (rate limited, backing off {backoff}s)" if backoff else "")
-        if topic_errors:
-            health.set(False, "; ".join(topic_errors.values())[:300], airborne=airborne)
+        refusals = list(topic_errors.values()) + list(listen_errors.values())
+        if refusals:
+            health.set(False, "; ".join(refusals)[:300], airborne=airborne)
         elif error_streak >= 3:
             health.set(False, "Errors: " + "; ".join(errors)[:300], airborne=airborne)
         elif backoff:
             health.set(True, f"Rate limited by {cfg['data_source']}, retrying in {backoff}s{flying}", airborne=airborne)
+        elif not subs:
+            health.set(True, "No aircraft yet. Text a tail number to a watcher's topic, or use Configure.")
         else:
             n_w = len(cfg["watchers"])
             health.set(True, f"Watching {len(subs)} aircraft for {n_w} watcher{'s' if n_w != 1 else ''}{flying}",
                        airborne=airborne)
-        time.sleep(max(0, cfg["poll_seconds"] + backoff - (time.time() - started)))
+        wait = max(0, cfg["poll_seconds"] + backoff - (time.time() - started))
+        if backoff:
+            time.sleep(wait)  # don't let text commands cut a rate-limit backoff short
+        else:
+            wake.wait(wait)
+        wake.clear()
 
 if __name__ == "__main__":
     run()

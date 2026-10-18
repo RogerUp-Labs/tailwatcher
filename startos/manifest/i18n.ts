@@ -4,7 +4,7 @@ export const short = {
 
 export const long = {
   en_US:
-    'TailWatcher watches tail numbers on public, unfiltered ADS-B data (adsb.lol or adsb.fi) and publishes to your NTFY server the moment one of them departs. Set up a watcher for each person, with their own NTFY topic and aircraft list. Each alert gives the nearest airport, altitude, speed and heading, and a button that opens the aircraft live on ADS-B Exchange. It can also tell you when the aircraft lands.',
+    'TailWatcher watches tail numbers on public, unfiltered ADS-B data (adsb.lol or adsb.fi) and publishes to your NTFY server the moment one of them departs. Set up a watcher for each person, with their own NTFY topic and aircraft list, which they can change by texting their topic (send a tail number to add it, "list" to see it). Each alert gives the nearest airport, altitude, speed and heading, and a button that opens the aircraft live on ADS-B Exchange. It can also tell you when the aircraft lands.',
 }
 
 export const installAlert = {

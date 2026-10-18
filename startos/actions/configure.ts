@@ -120,6 +120,12 @@ const inputSpec = InputSpec.of({
       },
     ],
   }),
+  textCommands: Value.toggle({
+    name: 'Text Commands',
+    description:
+      'Let each watcher change their own list by typing in their NTFY topic: send a tail number to add it, "remove N12345" to drop it, "list" to see it. Requires granting pkg_tailwatcher Read-Write on tailwatcher* in NTFY, and each watcher\'s user Read-Write on their topic.',
+    default: true,
+  }),
   mapLinks: Value.select({
     name: 'Map Buttons',
     description:
@@ -160,7 +166,7 @@ export const configure = sdk.Action.withInput(
   async () => ({
     name: 'Configure',
     description:
-      'Set up watchers (who gets alerts, on which NTFY topic, for which tail numbers). TailWatcher restarts to apply changes.',
+      'Set up watchers (who gets alerts, on which NTFY topic, for which tail numbers). Changes apply within a few seconds.',
     warning: null,
     allowedStatuses: 'any',
     group: null,
@@ -201,6 +207,7 @@ export const configure = sdk.Action.withInput(
       pollSeconds: input.pollSeconds,
       dataSource: input.dataSource,
       mapLinks: input.mapLinks,
+      textCommands: input.textCommands,
     })
     return null
   },
