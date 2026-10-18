@@ -1,6 +1,6 @@
 import { configJson } from './fileModels/config.json'
 import { sdk } from './sdk'
-import { healthPort, ntfyPhoneUrl, ntfyUrl } from './utils'
+import { healthPort, ntfyPhoneUrl, ntfyUrl, ownPublicUrl } from './utils'
 
 export const main = sdk.setupMain(async ({ effects }) => {
   // The watcher hot-reloads config.json itself (text commands edit it too), so
@@ -9,6 +9,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
   const config = await configJson.read().once()
   const ntfy = (await ntfyUrl(effects).const()) ?? ''
   const phone = (await ntfyPhoneUrl(effects).const()) ?? ''
+  const publicUrl = (await ownPublicUrl(effects).const()) ?? ''
   const watchers = config?.watchers ?? []
   const entries = new Set(
     watchers.flatMap((w) => w.aircraft.map((a) => a.tail)),
@@ -33,7 +34,7 @@ export const main = sdk.setupMain(async ({ effects }) => {
     subcontainer,
     exec: {
       command: ['python', '/app/tailwatcher.py'],
-      env: { NTFY_URL: ntfy, NTFY_PHONE_URL: phone },
+      env: { NTFY_URL: ntfy, NTFY_PHONE_URL: phone, TAILWATCHER_PUBLIC_URL: publicUrl },
     },
     ready: {
       display: 'Watcher',

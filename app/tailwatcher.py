@@ -31,6 +31,7 @@ import commands
 import edits
 import flights
 import history
+import invites
 import lookup
 import ntfy_admin
 import trips
@@ -41,7 +42,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.14.0"
+VERSION = "0.15.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
@@ -825,8 +826,11 @@ def run():
                          "ntfy_phone_mode": cur["ntfy_phone_mode"], "local_ntfy": bool(os.environ.get("NTFY_URL")),
                          "time_zone": cur["time_zone"], "web_password": cur["web_password"],
                          "time_zones": [[k, v] for k, v in edits.TIME_ZONES.items()],
+                         "public_url": os.environ.get("TAILWATCHER_PUBLIC_URL", "").strip(),
                          "listening": sorted(names[k] for k in names if k not in listen_errors)},
             "watchers": watchers_out, "trips": trips_out,
+            "invites": [{k: i.get(k) for k in ("token", "topic", "from", "expires", "kind")}
+                        for i in invites.active(now) if i.get("topic") in names],
             "history": [dict(e, watcher=names.get(e["topic"]) or e["topic"] or "Settings") for e in hist.recent(150)],
         }
 
@@ -882,10 +886,40 @@ def run():
             return 400, {"ok": False, "message": str(e)}
         return 404, {"ok": False, "message": "Not found."}
 
+    def public_page(token):
+        """The invite page at /join/<token> (no dashboard password)."""
+        inv = invites.find(token)
+        cur = load_config()
+        w = next((x for x in cur["watchers"] if inv and x["topic"] == inv["topic"]), None)
+        if inv is None or w is None:
+            return 404, invites.expired_page()
+        return 200, invites.join_page(inv, w["name"], resolve_ntfy(cur)[2], cur["ntfy_server"],
+                                      cur["ntfy_phone_mode"], commands.zone(cur["time_zone"]))
+
+    def invite_post(data):
+        names = {w["topic"]: w["name"] for w in load_config()["watchers"]}
+        if data.get("op") == "create":
+            topic = str(data.get("topic") or "")
+            if topic not in names:
+                return 404, {"ok": False, "message": "That watcher no longer exists."}
+            try:
+                inv = invites.create(topic, str(data.get("from") or ""), int(data.get("days") or invites.DEFAULT_DAYS))
+            except (TypeError, ValueError):
+                return 400, {"ok": False, "message": "Bad request."}
+            hist.add("in", topic, f"Invite link created for {names[topic]}", kind="web", status="received")
+            return 200, {"ok": True, "message": f"Invite for {names[topic]} ready.", "path": f"join/{inv['token']}",
+                         "expires": inv["expires"]}
+        if data.get("op") == "revoke":
+            n = invites.revoke(str(data.get("token") or ""))
+            return 200, {"ok": True, "message": "Invite cancelled." if n else "That invite was already gone."}
+        return 400, {"ok": False, "message": "Unknown action."}
+
     def handle_post(path, data):
         """Edits from the Web UI. Returns (http_status, {"ok", "message"})."""
         if path in ("/api/settings", "/api/ntfy-setup", "/api/ntfy-login"):
             return ntfy_post(path, data)
+        if path == "/api/invite":
+            return invite_post(data)
         topic = str(data.get("topic") or "")
         op = data.get("op")
         names = {w["topic"]: w["name"] for w in load_config()["watchers"]}  # fresh: see snapshot()
@@ -953,7 +987,8 @@ def run():
         log.info("web edit %s %s → %s", path, op, msg.splitlines()[0])
         return (400 if failed else 200), {"ok": not failed, "message": msg}
 
-    web.serve(HEALTH_PORT, health, snapshot, require_password=web_password_required, post=handle_post)
+    web.serve(HEALTH_PORT, health, snapshot, require_password=web_password_required, post=handle_post,
+              public=public_page)
 
     backoff, error_streak = 0, 0
     while True:

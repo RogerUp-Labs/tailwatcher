@@ -56,7 +56,7 @@ def same_origin(origin, host):
 
 
 def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
-                 require_password=lambda: False, post=None):
+                 require_password=lambda: False, post=None, public=None):
     class Handler(BaseHTTPRequestHandler):
         def reply(self, code, body, ctype="application/json", extra=None):
             if isinstance(body, (dict, list)):
@@ -115,7 +115,13 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
             path = urllib.parse.urlparse(self.path).path
             if path == "/health":
                 return self.reply(200, health.get())
-            if self.locked():
+            # Invite pages are for people without dashboard access, so they skip the
+            # password; each shows one person's subscribe details behind a random token.
+            if path.startswith("/join/") and public is not None:
+                code, page = public(path[len("/join/"):])
+                return self.reply(code, page, "text/html; charset=utf-8",
+                                  {"X-Robots-Tag": "noindex, nofollow"})
+            if path != "/icon.svg" and self.locked():
                 return
             if path == "/api/state":
                 return self.reply(200, snapshot())
@@ -135,8 +141,8 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
 
 
 def serve(port, health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
-          require_password=lambda: False, post=None):
+          require_password=lambda: False, post=None, public=None):
     srv = ThreadingHTTPServer(("0.0.0.0", port),
-                              make_handler(health, snapshot, password_path, web_dir, require_password, post))
+                              make_handler(health, snapshot, password_path, web_dir, require_password, post, public))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

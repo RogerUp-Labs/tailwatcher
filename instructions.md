@@ -13,14 +13,18 @@ Nothing else is needed: alerts go through the public ntfy.sh service by default,
 
 ## Connecting a phone
 
-Each watcher has their own notification topic, a long random name that TailWatcher picks. **Connect phone** on the dashboard shows everything that person needs:
+Each watcher has their own notification topic, a long random name that TailWatcher picks. Open **Connect phone** on that watcher. Distance doesn't matter: someone in another state gets alerts the same way.
+
+**Send an invite link** (best when they're not with you): type your name, pick how long the link should work (7 days by default), tap **Create invite link**, then **Send invite** to text it, or send it by iMessage, Signal or email. It's a normal web link, so it's tappable in any messaging app. It opens a page that walks them through installing ntfy and subscribing in two taps. Active invites are listed in the dialog, where **Cancel** stops one. Invite links need TailWatcher to have a public address in StartOS (for example through StartTunnel); without one, they only work on your home network.
+
+**With their phone in hand**, use the steps under the invite box:
 
 1. Install the free **ntfy** app (Google Play, F-Droid or the App Store; the links are in the dialog).
-2. Tap the subscribe link on their phone. **Send link** shares it by text message or email; **Copy link** copies it. The ntfy app opens with their alerts ready to subscribe.
+2. Tap the subscribe link on their phone. **Send link** shares it; **Copy link** copies it. The ntfy app opens with their alerts ready to subscribe.
 
 If the link doesn't open the app, open the web link shown under it, or in the ntfy app tap **+**, turn on **Use another server**, and enter the server and topic shown in the dialog.
 
-Keep these links private: anyone with a person's link could read their alerts.
+Keep these links private: anyone with a person's link or invite could read their alerts.
 
 ## Watching planes and flights
 
@@ -145,6 +149,10 @@ Self-hosted NTFY can't use Apple's instant push service, so iPhones may only rec
 ### "Too many requests" in System
 
 The free ADS-B feeds limit how often anyone can ask. TailWatcher switches to the other feed and backs off automatically. If it keeps happening, raise **Check every** in **⚙ Settings**.
+
+### Someone says their invite link has expired
+
+Invites work for the number of days you picked. Open **Connect phone** for that person and create a new one.
 
 ### The Connect phone link doesn't open the app
 

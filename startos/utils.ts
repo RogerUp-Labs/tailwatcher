@@ -16,6 +16,17 @@ export const newTopic = (name: string) =>
   utils.getDefaultString({ charset: 'a-h,j-k,m-n,p-z,2-9', len: 20 })
 
 /**
+ * TailWatcher's own public HTTPS address (e.g. via StartTunnel), for invite
+ * links that work away from home. Null if it only has LAN addresses.
+ */
+export const ownPublicUrl = (effects: T.Effects) =>
+  sdk.serviceInterface.getOwn(effects, 'ui', (i) =>
+    i?.addressInfo
+      ?.filter({ visibility: 'public', predicate: (h) => h.ssl })
+      .format()[0] ?? null,
+  )
+
+/**
  * The address phones use to reach this server's NTFY, for "Connect phone"
  * links: a public HTTPS domain if NTFY has one, else its LAN HTTPS address.
  */
