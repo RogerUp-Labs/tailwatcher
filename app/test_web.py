@@ -22,8 +22,9 @@ class WebServerTest(unittest.TestCase):
         cls.pw = os.path.join(cls.dir, "webui.json")
         with open(os.path.join(cls.dir, "index.html"), "w") as f:
             f.write("<title>TailWatcher</title>")
+        cls.required = False
         cls.srv = web.serve(0, Health(), lambda: {"watchers": [], "secret": False},
-                            password_path=cls.pw, web_dir=cls.dir)
+                            password_path=cls.pw, web_dir=cls.dir, require_password=lambda: cls.required)
         cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
 
     @classmethod
@@ -48,6 +49,16 @@ class WebServerTest(unittest.TestCase):
         code, body, _ = self.get("/health")
         self.assertEqual(code, 200)
         self.assertEqual(json.loads(body)["message"], "Watching 1 aircraft")
+
+    def setUp(self):
+        type(self).required = True
+
+    def test_open_by_default(self):
+        type(self).required = False
+        self.set_password("correct-horse")
+        code, body, _ = self.get("/api/state")
+        self.assertEqual((code, json.loads(body)), (200, {"watchers": [], "secret": False}))
+        self.assertEqual(self.get("/")[0], 200)
 
     def test_no_password_file_locks_everything(self):
         if os.path.exists(self.pw):

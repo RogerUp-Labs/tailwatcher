@@ -7,7 +7,7 @@ export const showPassword = sdk.Action.withoutInput(
   async () => ({
     name: 'Show Web UI Password',
     description:
-      'The password for the TailWatcher dashboard. Your browser asks for a username too; anything works.',
+      'The dashboard password, used only when "Require Web UI Password" is on in Configure. Your browser asks for a username too; anything works.',
     warning: null,
     allowedStatuses: 'any',
     group: 'Web UI',

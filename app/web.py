@@ -1,9 +1,10 @@
 """TailWatcher's web UI server: the dashboard page, its JSON data, and /health.
 
-/health is open (StartOS's health check calls it from inside the container);
-everything else needs the Web UI password, sent with HTTP Basic auth (any
-username). The password lives in /data/webui.json, written by StartOS at
-install and shown by the "Show Web UI Password" action.
+No login by default: it's an admin panel for a household server, reachable
+only where StartOS exposes it. With "Require Web UI password" on in
+Configure, everything except /health (the StartOS health check) needs the
+password from /data/webui.json via HTTP Basic auth (any username); StartOS
+writes it at install and "Show Web UI Password" displays it.
 """
 
 import base64
@@ -39,7 +40,8 @@ def authorized(header, password):
     return hmac.compare_digest(given.encode(), password.encode())
 
 
-def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR):
+def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
+                 require_password=lambda: False):
     class Handler(BaseHTTPRequestHandler):
         def reply(self, code, body, ctype="application/json", extra=None):
             if isinstance(body, (dict, list)):
@@ -61,11 +63,11 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR)
             path = urllib.parse.urlparse(self.path).path
             if path == "/health":
                 return self.reply(200, health.get())
-            password = read_password(password_path)
-            if not password:
+            password = read_password(password_path) if require_password() else None
+            if require_password() and not password:
                 return self.reply(503, "The Web UI password hasn't been set up yet. Restart TailWatcher.",
                                   "text/plain; charset=utf-8")
-            if not authorized(self.headers.get("Authorization"), password):
+            if password and not authorized(self.headers.get("Authorization"), password):
                 return self.reply(401, "Use the password from TailWatcher → Actions → Show Web UI Password.",
                                   "text/plain; charset=utf-8",
                                   {"WWW-Authenticate": 'Basic realm="TailWatcher", charset="UTF-8"'})
@@ -86,7 +88,9 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR)
     return Handler
 
 
-def serve(port, health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR):
-    srv = ThreadingHTTPServer(("0.0.0.0", port), make_handler(health, snapshot, password_path, web_dir))
+def serve(port, health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
+          require_password=lambda: False):
+    srv = ThreadingHTTPServer(("0.0.0.0", port),
+                              make_handler(health, snapshot, password_path, web_dir, require_password))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

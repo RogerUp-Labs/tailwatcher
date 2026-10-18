@@ -35,7 +35,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/homebrew-gh/tailwatcher)"
 
 DATA_SOURCES = {
@@ -123,6 +123,7 @@ def load_config(path=CONFIG_PATH, now=None):
         "text_commands": bool(raw.get("textCommands", True)),
         "time_zone": raw.get("timeZone") or commands.DEFAULT_TZ,
         "adb_key": (raw.get("aerodataboxKey") or "").strip(),
+        "web_password": bool(raw.get("webPassword", False)),
     }
 
 
@@ -311,6 +312,16 @@ def fetch_aircraft(source, key, kind="tail", timeout=15):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return pick_match(json.load(r), key, kind)
+
+
+def web_password_required(path=CONFIG_PATH):
+    """Read straight from config.json on each request, so turning the password
+    on in Configure applies at once rather than at the next poll cycle."""
+    try:
+        with open(path) as f:
+            return json.load(f).get("webPassword") is True
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def config_mtime():
@@ -627,7 +638,7 @@ def run():
             "history": [dict(e, watcher=names.get(e["topic"], e["topic"])) for e in hist.recent(150)],
         }
 
-    web.serve(HEALTH_PORT, health, snapshot)
+    web.serve(HEALTH_PORT, health, snapshot, require_password=web_password_required)
 
     backoff, error_streak = 0, 0
     while True:

@@ -171,6 +171,12 @@ const inputSpec = InputSpec.of({
     masked: true,
     placeholder: 'RapidAPI key',
   }),
+  webPassword: Value.toggle({
+    name: 'Require Web UI Password',
+    description:
+      'Off: the dashboard opens without a login for anyone who can reach it (on StartOS 0.4 that is your local network and VPN unless you add a public address). On: the browser asks for a password (any username); see "Show Web UI Password".',
+    default: false,
+  }),
   mapLinks: Value.select({
     name: 'Map Buttons',
     description:
@@ -284,6 +290,7 @@ export const configure = sdk.Action.withInput(
       textCommands: input.textCommands,
       timeZone: input.timeZone,
       aerodataboxKey: input.aerodataboxKey?.trim() ?? '',
+      webPassword: input.webPassword,
     })
     return null
   },

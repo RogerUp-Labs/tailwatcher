@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.8.0:0',
+  version: '0.8.1:0',
   releaseNotes: {
     en_US:
-      'Web UI: a dashboard of your trips (route, departure, the plane flying in and how far along it is), every watcher\'s aircraft with what\'s airborne now, recent alerts and text commands, and system status. Open it from the Web UI interface and log in with any username and the password from "Show Web UI Password". Read-only for now; changes still go through text commands or Configure.',
+      'The Web UI no longer asks for a password by default: it is a household admin panel showing everyone\'s watchers and trips, reachable on your network and VPN. Turn on "Require Web UI Password" in Configure if you want one.',
   },
   migrations: {
     up: async () => {},

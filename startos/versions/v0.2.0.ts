@@ -35,6 +35,7 @@ export const v0_2_0 = VersionInfo.of({
         textCommands: true,
         timeZone: 'America/New_York',
         aerodataboxKey: '',
+        webPassword: false,
       })
     },
     down: IMPOSSIBLE,

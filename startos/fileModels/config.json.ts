@@ -61,6 +61,8 @@ const shape = z.object({
     .catch('America/New_York'),
   /** Optional RapidAPI key for AeroDataBox; lets "inbound UA1234" find the plane itself. */
   aerodataboxKey: z.string().catch(''),
+  /** Ask for the Web UI password (webui.json). Off: the dashboard is open to anyone who can reach it. */
+  webPassword: z.boolean().catch(false),
 })
 
 export type Config = z.infer<typeof shape>
