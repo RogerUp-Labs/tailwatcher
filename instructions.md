@@ -81,7 +81,7 @@ Before a flight, the plane you'll fly on is usually still finishing an earlier f
 **Round trips.** Going and coming back? Enter both flights at once: fill in **Return flight** on **+ Add trip**, or text `inbound UA1234 11/14 return UA5678 11/21`. Without an AeroDataBox key, give each flight its plane and time: `inbound UA1234 N38473 11/14 dep 4:30pm return UA5678 N12345 11/21 dep 6pm`. Already added your flight out? Text `return 1 UA5678 11/21` to add the flight home to trip 1.
 
 - The flight home leaves from where your flight out lands. Add `from LAS` after the return flight if it doesn't.
-- Times you type are in TailWatcher's time zone (**⚙ Settings**), including the return's.
+- Times you type are local to the airport the flight leaves from: `dep 6pm from LAS` means 6pm in Las Vegas. If TailWatcher doesn't know that airport yet (no AeroDataBox key and no `from`), it reads the time in its own time zone (**⚙ Settings**), so add `from LAS` to a return that leaves from another time zone. Messages and the dashboard always show times in TailWatcher's time zone.
 - Both flights are listed together and numbered one after the other. `change` edits one flight; `share` and `cancel` cover both, unless you add `only` (`cancel 2 only`).
 - With an AeroDataBox key, each flight is checked on its own schedule, so a round trip booked a month ahead uses about 40 of the 400 free monthly requests.
 

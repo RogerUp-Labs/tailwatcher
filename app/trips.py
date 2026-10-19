@@ -147,19 +147,31 @@ def as_inbound(kind, shown, key):
             "callsign": key if kind == "flight" else None}
 
 
+def airport_zone(airport, airports, tz_name):
+    """The time zone a typed departure time is in: the departure airport's when
+    known (a return from LAS leaves on Las Vegas time), else TailWatcher's."""
+    return getattr(airports, "tz", {}).get(airport or "") or tz_name
+
+
 def departure_time(day, clock, explicit_day, now, tz_name):
-    """Unix time of `clock` on `day`; "dep 9am" said in the evening means tomorrow."""
-    local = datetime.datetime.combine(day, datetime.time(*clock), commands.zone(tz_name))
+    """Unix time of `clock` on `day` in tz_name; "dep 9am" said in the evening
+    means tomorrow. Without an explicit day, "today" is today in tz_name."""
+    tz = commands.zone(tz_name)
+    if not explicit_day:
+        day = datetime.datetime.fromtimestamp(now, tz).date()
+    local = datetime.datetime.combine(day, datetime.time(*clock), tz)
     if not explicit_day and local.timestamp() < now - 3600:
         local += datetime.timedelta(days=1)
     return local.timestamp(), local.date()
 
 
-def parse_inbound(text, now, tz_name, airports, need_date=False):
+def parse_inbound(text, now, tz_name, airports, need_date=False, default_airport=None):
     """Parse "UA1234 [N38473|UA567] [dep] [4:30pm] [tomorrow|10/20] [from IAD]".
 
     Returns a new trip dict, or an error string to send back. need_date: the
-    flight home has no sensible default day.
+    flight home has no sensible default day. default_airport: where it leaves
+    from without "from" (the return leaves from where the outbound lands).
+    A typed time is in the departure airport's time zone.
     """
     words = commands.merge_flight_words((text or "").split(), 0)
     if not words:
@@ -174,11 +186,12 @@ def parse_inbound(text, now, tz_name, airports, need_date=False):
         return f"🤔 I can only follow one plane per trip.\n\n{USAGE}"
     if need_date and not f["explicit_day"]:
         return f"🤔 Which day is {flight[0]}? Add its date, e.g. \"{flight[0]} 11/21\"."
-    day, dep_time = f["day"], None
+    day, dep_time, airport = f["day"], None, f["airport"] or default_airport
     if f["clock"]:
-        dep_time, day = departure_time(day, f["clock"], f["explicit_day"], now, tz_name)
+        dep_time, day = departure_time(day, f["clock"], f["explicit_day"], now,
+                                       airport_zone(airport, airports, tz_name))
     inbound = as_inbound(*f["idents"][0][:3]) if f["idents"] else None
-    return new_trip(flight, day.isoformat(), dep_time, f["airport"], inbound, now)
+    return new_trip(flight, day.isoformat(), dep_time, airport, inbound, now)
 
 
 def about_return(err):
@@ -194,14 +207,13 @@ def parse_return(outbound, text, now, tz_name, airports):
 
     It leaves from where the outbound lands unless told otherwise. Returns a
     trip dict or an error string."""
-    ret = parse_inbound(text, now, tz_name, airports, need_date=True)
+    ret = parse_inbound(text, now, tz_name, airports, need_date=True,
+                        default_airport=outbound.get("arr_airport"))
     if isinstance(ret, str):
         return about_return(ret)
     if ret["date"] < outbound["date"]:
         return (f"❌ Return flight: {ret['flight']} on {fmt_day(ret, tz_name)} is before "
                 f"{outbound['flight']} on {fmt_day(outbound, tz_name)}.")
-    if not ret["dep_airport"]:
-        ret["dep_airport"] = outbound.get("arr_airport")
     return ret
 
 
@@ -241,6 +253,9 @@ def apply_change(trip, text, now, tz_name, airports):
         else:
             renumber = flights.parse_flight(shown)
     needs_lookup = False
+    if f["airport"]:
+        trip["dep_airport"] = f["airport"]
+    zone = airport_zone(trip.get("dep_airport"), airports, tz_name)
     if renumber and renumber[0] != trip["flight"]:
         trip["flight"], trip["callsign"] = renumber
         needs_lookup = True
@@ -251,17 +266,15 @@ def apply_change(trip, text, now, tz_name, airports):
         # Keep your departure time (AeroDataBox overwrites it if it knows
         # better); a new date keeps the same clock time on that day.
         if trip.get("dep_time") and f["explicit_day"] and not f["clock"]:
-            old = datetime.datetime.fromtimestamp(trip["dep_time"], commands.zone(tz_name))
-            trip["dep_time"], _ = departure_time(f["day"], (old.hour, old.minute), True, now, tz_name)
+            old = datetime.datetime.fromtimestamp(trip["dep_time"], commands.zone(zone))
+            trip["dep_time"], _ = departure_time(f["day"], (old.hour, old.minute), True, now, zone)
         trip.update(seen=False, missing=False, replacement=None,
                     checkpoints=list(CHECKPOINT_HOURS), last_check=None)
         if not trip.get("plane_locked"):
             trip["inbound"] = None
-    if f["airport"]:
-        trip["dep_airport"] = f["airport"]
     if f["clock"]:
         day = datetime.date.fromisoformat(trip["date"])
-        trip["dep_time"], day = departure_time(day, f["clock"], True, now, tz_name)
+        trip["dep_time"], day = departure_time(day, f["clock"], True, now, zone)
     if plane:
         trip["inbound"], trip["plane_locked"] = plane, True
     if plane or needs_lookup:

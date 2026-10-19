@@ -162,6 +162,7 @@ class Airports:
         self.rows = []
         self.coords = {}  # ident -> (lat, lon, name)
         self.iata = {}    # "IAD" -> "KIAD"
+        self.tz = {}      # ident -> "America/New_York"
         try:
             with open(path, newline="") as f:
                 for r in csv.DictReader(f):
@@ -170,6 +171,8 @@ class Airports:
                     self.coords[r["ident"]] = (lat, lon, r["name"])
                     if r.get("iata"):
                         self.iata.setdefault(r["iata"], r["ident"])
+                    if r.get("tz"):
+                        self.tz[r["ident"]] = r["tz"]
         except (OSError, KeyError, ValueError) as e:
             log.warning("airport database unavailable (%s)", e)
 
@@ -881,6 +884,7 @@ def run():
                     "departed", "landed", "eta_sent", "tight", "late", "missing", "replacement",
                     "last_check", "plane_locked", "itinerary", "leg")},
                     "topic": topic, "watcher": name, "number": n, "live": trips.is_live(t, now),
+                    "dep_tz": trips.airport_zone(t.get("dep_airport"), airports, cur["time_zone"]),
                     "shared_with": [x for x in (t.get("shared_with") or []) if x in names],
                     "shared_names": [names[x] for x in (t.get("shared_with") or []) if x in names],
                     "next_check": trips.next_check_time(t, now) if cur["adb_key"] else None})
