@@ -13,7 +13,7 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 | T3 | Landing alert ("landed") with Landing alerts on | ✅ | 2026-10-19 |
 | T4 | "Likely landed" (dropped off radar below 3,000 ft) | | |
 | T5 | No landing alert for a watcher with Landing alerts off | | |
-| T6 | Tapping an alert opens the plane on the live map | | |
+| T6 | Tapping an alert opens the plane on the live map | ✅ | 2026-10-19 |
 | T7 | A plane already flying when added alerts within seconds | | |
 | T8 | Two watchers following the same tail both get one alert each (no duplicates) | | |
 | T9 | Touch-and-go / pattern work doesn't spam alerts | | |
@@ -102,4 +102,4 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 
 ## Log
 
-- **2026-10-19:** Watched a tail number; got the takeoff alert and the landing alert, both accurate (T1, T3). Started tracking an outbound and return commercial flight for next month (R14).
+- **2026-10-19:** Watched a tail number; got the takeoff alert and the landing alert, both accurate (T1, T3). Tapping the alert opened the plane on the live map (T6). Started tracking an outbound and return commercial flight for next month (R14).
