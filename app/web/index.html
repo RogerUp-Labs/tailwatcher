@@ -294,7 +294,9 @@ dialog.help { width: min(720px, calc(100vw - 24px)); }
 .themes button[aria-pressed="true"] { background: #fff; color: #0e2546; font-weight: 600; }
 @media (max-width: 560px) {
   .status { padding: 8px; margin-left: auto; } .status span { display: none; }
-  .top-inner { gap: 10px; } .top img { width: 30px; height: 30px; }
+  .top-inner { gap: 10px; flex-wrap: wrap; row-gap: 8px; } .top img { width: 30px; height: 30px; }
+  /* The theme switch gets its own row so the header fits phone widths. */
+  .themes { order: 1; margin-left: auto; }
   .themes button { padding: 4px 8px; }
   .gear { padding: 5px 9px; font-size: 15px; } .gear-label { display: none; }
   .theme-board .brand { font-size: 16px; letter-spacing: 1px; }
