@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.15.0:0',
+  version: '0.16.0:0',
   releaseNotes: {
     en_US:
-      'Invite links: Connect phone can create a normal web link to text, iMessage or Signal to someone anywhere. It opens a simple page that walks them through installing ntfy and subscribing in two taps. Invites expire after the days you choose (7 by default) and can be cancelled from the dashboard. They use TailWatcher\'s public address (for example StartTunnel) and show only that one person\'s subscribe details.',
+      'Round trips: enter your flight out and your flight home in one go, by text (inbound UA1234 11/14 return UA5678 11/21) or with the new Return flight row on + Add trip. Both flights are tracked as one trip: they\'re listed together, sharing covers both with a single note to family, and cancelling covers both unless you say only. return 1 UA5678 11/21 adds the flight home to a trip you already have. The return leaves from where the outbound lands unless you say otherwise. With AeroDataBox, a round trip booked a month ahead uses about 40 of the free plan\'s 400 monthly requests.',
   },
   migrations: {
     up: async () => {},
