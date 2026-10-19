@@ -2,7 +2,8 @@ FROM python:3.12-alpine AS airports
 WORKDIR /build
 COPY app/trim_airports.py .
 RUN wget -q -O airports-full.csv https://davidmegginson.github.io/ourairports-data/airports.csv \
- && python trim_airports.py airports-full.csv airports.csv
+ && wget -q -O airports-tz.json https://raw.githubusercontent.com/mwgg/Airports/master/airports.json \
+ && python trim_airports.py airports-full.csv airports.csv airports-tz.json
 
 FROM python:3.12-alpine
 WORKDIR /app

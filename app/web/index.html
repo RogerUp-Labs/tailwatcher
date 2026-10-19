@@ -620,7 +620,7 @@ function flaps(key, text, n, cls = "") {
     return `<span class="flap ${cls}${flip}"${delay} aria-hidden="true">${ch === " " ? "&nbsp;" : esc(ch)}</span>`;
   }).join("")}</span>`;
 }
-const hhmm = (t) => new Intl.DateTimeFormat("en-GB", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: TZ}).format(t * 1000);
+const hhmm = (t, zone) => new Intl.DateTimeFormat("en-GB", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: zone || TZ}).format(t * 1000);
 const mmdd = (t) => new Intl.DateTimeFormat("en-US", {month: "2-digit", day: "2-digit", timeZone: TZ}).format(t * 1000);
 const apt = (code) => (code || "").replace(/^K(?=[A-Z]{3}$)/, "");  // KIAD -> IAD, like a real board
 
@@ -819,7 +819,7 @@ function tripForm(t) {
     ...(t ? [] : [{name: "topic", label: "For", type: "select", options: watcherOptions()}]),
     [{name: "flight", label: "Your flight", value: t ? t.flight : "", placeholder: "UA1234", required: true},
      {name: "date", label: "Date", type: "date", value: t ? t.date : localDate(NOW)}],
-    [{name: "time", label: "Departs", type: "time", value: t && t.dep_time ? hhmm(t.dep_time) : "", hint: adb && !t ? "Optional with AeroDataBox" : "Your local time"},
+    [{name: "time", label: "Departs", type: "time", value: t && t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", hint: adb && !t ? "Optional with AeroDataBox" : "Local time where it leaves"},
      {name: "airport", label: "From airport", value: t ? apt(t.dep_airport) : "", placeholder: "IAD", hint: "Optional"}],
     {name: "plane", label: "Plane flying in", value: inb.tail || inb.flight || "", placeholder: "N38473 or UA567",
      hint: adb ? "Leave blank and AeroDataBox finds it. See ? Help → Trips." : "From your airline app's \"Where's my plane?\" screen. See ? Help → Trips."},
@@ -827,7 +827,7 @@ function tripForm(t) {
       {type: "heading", label: "Return flight", hint: "Optional: your flight home, tracked as part of the same trip."},
       [{name: "ret_flight", label: "Return flight", placeholder: "UA5678"},
        {name: "ret_date", label: "Date", type: "date"}],
-      [{name: "ret_time", label: "Departs", type: "time", hint: adb ? "Optional with AeroDataBox" : "In your home time zone (Settings)"},
+      [{name: "ret_time", label: "Departs", type: "time", hint: adb ? "Optional with AeroDataBox" : "Local time where it leaves"},
        {name: "ret_airport", label: "From airport", placeholder: "LAS", hint: "Blank: where you land"}],
       {name: "ret_plane", label: "Plane flying in", placeholder: "N12345 or UA567", hint: adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the return)."},
     ] : []),
@@ -838,7 +838,7 @@ function tripForm(t) {
   ];
   if (!t) return openForm({title: "Add trip", fields, saveLabel: "Add trip",
     save: (v) => api("api/trip", {op: "add", ...v, share: (v.share || []).filter((x) => x !== v.topic)})});
-  const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time) : "", airport: apt(t.dep_airport), plane: inb.tail || inb.flight || ""};
+  const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", airport: apt(t.dep_airport), plane: inb.tail || inb.flight || ""};
   openForm({title: `Edit ${t.flight} · ${t.watcher}`, fields,
     save: (v) => {
       const {share = [], ...rest} = v;

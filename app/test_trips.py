@@ -1,9 +1,12 @@
+import csv
 import datetime
+import json
 import os
 import tempfile
 import unittest
 
 import commands
+import trim_airports
 import trips
 
 TZ = "America/New_York"
@@ -21,6 +24,8 @@ class FakeAirports:
               "KORD": (41.9786, -87.9048, "Chicago O'Hare"),
               "KDEN": (39.8617, -104.6731, "Denver")}
     iata = {"IAD": "KIAD", "ORD": "KORD", "DEN": "KDEN", "LAS": "KLAS"}
+    tz = {"KIAD": "America/New_York", "KLAS": "America/Los_Angeles",
+          "KORD": "America/Chicago", "KDEN": "America/Denver"}
 
 
 AIR = FakeAirports()
@@ -244,15 +249,22 @@ class ChangeTest(unittest.TestCase):
     def test_time_date_airport_and_plane(self):
         self.assertEqual(self.change("dep 5:10pm"), (None, False))
         self.assertEqual(self.trip["dep_time"], ts(2026, 10, 24, 17, 10))
-        err, lookup = self.change("10/25 7am from ORD")
+        err, lookup = self.change("10/25 7am from ORD")             # 7am Chicago time
         self.assertTrue(lookup)
         self.assertEqual((self.trip["date"], self.trip["dep_time"], self.trip["dep_airport"]),
-                         ("2026-10-25", ts(2026, 10, 25, 7), "KORD"))
+                         ("2026-10-25", ts(2026, 10, 25, 8), "KORD"))
         self.assertEqual(self.change("N38473"), (None, False))
         self.assertEqual(self.trip["inbound"]["tail"], "N38473")
         self.assertTrue(self.trip["plane_locked"])
         self.change("plane UA567")
         self.assertEqual(self.trip["inbound"]["flight"], "UA567")
+
+    def test_times_follow_the_departure_airport(self):
+        self.trip["dep_airport"] = "KLAS"
+        self.change("dep 6pm")                                       # 6pm in Las Vegas
+        self.assertEqual(self.trip["dep_time"], ts(2026, 10, 24, 21))
+        self.change("10/26")                                         # still 6pm there
+        self.assertEqual(self.trip["dep_time"], ts(2026, 10, 26, 21))
 
     def test_nothing_to_change(self):
         self.assertIn("What should change", self.change("")[0])
@@ -491,7 +503,7 @@ class ItineraryTest(unittest.TestCase):
         self.assertEqual((out["dep_airport"], out["inbound"]["tail"]), ("KIAD", "N38473"))
         self.assertEqual(out["dep_time"], ts(2026, 11, 14, 16, 30))
         self.assertEqual((ret["flight"], ret["dep_airport"], ret["inbound"]["tail"]), ("UA5678", "KLAS", "N12345"))
-        self.assertEqual(ret["dep_time"], ts(2026, 11, 21, 18))
+        self.assertEqual(ret["dep_time"], ts(2026, 11, 21, 21))      # 6pm in Las Vegas is 9pm at home
 
     def test_return_errors(self):
         self.assertIn("Which day is UA5678", self.parse("UA1234 11/14 return UA5678"))
@@ -505,6 +517,31 @@ class ItineraryTest(unittest.TestCase):
         out["arr_airport"] = "KLAS"
         self.assertEqual(trips.parse_return(out, "UA5678 11/21", NOON, TZ, AIR)["dep_airport"], "KLAS")
         self.assertEqual(trips.parse_return(out, "UA5678 11/21 from ORD", NOON, TZ, AIR)["dep_airport"], "KORD")
+        self.assertEqual(trips.parse_return(out, "UA5678 11/21 dep 6pm", NOON, TZ, AIR)["dep_time"],
+                         ts(2026, 11, 21, 21))
+
+    def test_typed_times_without_a_known_zone_are_home_time(self):
+        self.assertEqual(trips.parse_inbound("UA1 11/21 dep 6pm", NOON, TZ, AIR)["dep_time"], ts(2026, 11, 21, 18))
+        bare = FakeAirports()
+        bare.tz = {}                                                   # an image built without time zones
+        self.assertEqual(trips.parse_inbound("UA1 11/21 dep 6pm from LAS", NOON, TZ, bare)["dep_time"],
+                         ts(2026, 11, 21, 18))
+
+    def test_airport_time_zones_at_build_time(self):
+        d = tempfile.mkdtemp()
+        src, dst, tz = (os.path.join(d, n) for n in ("full.csv", "out.csv", "tz.json"))
+        with open(src, "w") as f:
+            f.write("ident,type,name,latitude_deg,longitude_deg,iata_code,icao_code,gps_code,local_code\n"
+                    "KLAS,large_airport,Harry Reid,36.08,-115.15,LAS,KLAS,KLAS,LAS\n"
+                    "0L7,small_airport,Jean,35.77,-115.33,,,0L7,0L7\n"
+                    "XX1,small_airport,Nowhere,-60.0,-140.0,,,,\n"
+                    "X,heliport,Pad,36.0,-115.0,,,,\n")
+        with open(tz, "w") as f:
+            json.dump({"KLAS": {"iata": "LAS", "lat": 36.08, "lon": -115.15, "tz": "America/Los_Angeles"}}, f)
+        trim_airports.main(src, dst, tz)
+        with open(dst) as f:
+            rows = {r["ident"]: r["tz"] for r in csv.DictReader(f)}
+        self.assertEqual(rows, {"KLAS": "America/Los_Angeles", "0L7": "America/Los_Angeles", "XX1": ""})
 
     def test_legs_numbered_together(self):
         self.store("AA1 11/16")                       # between the two flights of the round trip
@@ -547,7 +584,7 @@ class ItineraryTest(unittest.TestCase):
         out["leg"], ret["leg"] = "out", "return"
         title, msg, _ = trips.share_announcement([out, ret], "Sam", TZ)
         self.assertEqual(title, "📣 Sam shared a round trip with you")
-        self.assertIn("UA1234 · Sat Nov 14, departs 4:05pm from KIAD.\nReturn: UA5678 · Sat Nov 21, departs 6:00pm from KLAS.", msg)
+        self.assertIn("UA1234 · Sat Nov 14, departs 4:05pm from KIAD.\nReturn: UA5678 · Sat Nov 21, departs 9:00pm from KLAS.", msg)
 
     def test_return_command_parse(self):
         self.assertEqual(commands.parse("return 1 UA5678 11/21")[:2], ("return", "1 UA5678 11/21"))
