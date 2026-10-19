@@ -15,6 +15,12 @@ Two ways to say which plane it is:
 Trips live in trips.json (not config.json, so the Configure form never
 touches them) and are removed a few hours after departure. "trips" numbers
 them soonest first; "change 2 …" and "cancel 2" act on that numbering.
+
+Itineraries: "inbound UA1234 11/14 return UA5678 11/21" adds both flights of
+a round trip. Each is an ordinary trip (checks, tracking and "change" work
+per flight), linked by a shared "itinerary" id with leg "out" or "return".
+Legs are numbered together, and "cancel"/"share" act on both unless told
+"only".
 """
 
 import datetime
@@ -22,6 +28,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 import urllib.error
@@ -61,8 +68,10 @@ USAGE = (
     "Tell me your flight and the plane flying in for it, e.g.\n"
     "inbound UA1234 N38473 dep 4:30pm\n"
     "(the plane is in your airline app under \"Where's my plane?\"; a flight number like UA567 works too). "
-    "Add \"tomorrow\" or a date like 10/20, and \"from IAD\" if it isn't obvious."
+    "Add \"tomorrow\" or a date like 10/20, and \"from IAD\" if it isn't obvious. "
+    "Flying back too? Add \"return UA5678 11/21\"."
 )
+RETURN_WORDS = ("return", "returning")
 
 
 # --------------------------------------------------------------- parsing
@@ -146,10 +155,11 @@ def departure_time(day, clock, explicit_day, now, tz_name):
     return local.timestamp(), local.date()
 
 
-def parse_inbound(text, now, tz_name, airports):
+def parse_inbound(text, now, tz_name, airports, need_date=False):
     """Parse "UA1234 [N38473|UA567] [dep] [4:30pm] [tomorrow|10/20] [from IAD]".
 
-    Returns a new trip dict, or an error string to send back.
+    Returns a new trip dict, or an error string to send back. need_date: the
+    flight home has no sensible default day.
     """
     words = commands.merge_flight_words((text or "").split(), 0)
     if not words:
@@ -162,11 +172,52 @@ def parse_inbound(text, now, tz_name, airports):
         return f"{f}\n\n{USAGE}"
     if len(f["idents"]) > 1:
         return f"🤔 I can only follow one plane per trip.\n\n{USAGE}"
+    if need_date and not f["explicit_day"]:
+        return f"🤔 Which day is {flight[0]}? Add its date, e.g. \"{flight[0]} 11/21\"."
     day, dep_time = f["day"], None
     if f["clock"]:
         dep_time, day = departure_time(day, f["clock"], f["explicit_day"], now, tz_name)
     inbound = as_inbound(*f["idents"][0][:3]) if f["idents"] else None
     return new_trip(flight, day.isoformat(), dep_time, f["airport"], inbound, now)
+
+
+def about_return(err):
+    """Label an error as being about the flight home, keeping its leading emoji
+    (the Web UI reads that to tell a failure)."""
+    if err[:1] in ("❌", "🤔", "🤷") and err[1:2] == " ":
+        return f"{err[0]} Return flight: {err[2:]}"
+    return f"❌ Return flight: {err}"
+
+
+def parse_return(outbound, text, now, tz_name, airports):
+    """The flight home for `outbound` ("UA5678 11/21 [N123] [dep 6pm] [from LAS]").
+
+    It leaves from where the outbound lands unless told otherwise. Returns a
+    trip dict or an error string."""
+    ret = parse_inbound(text, now, tz_name, airports, need_date=True)
+    if isinstance(ret, str):
+        return about_return(ret)
+    if ret["date"] < outbound["date"]:
+        return (f"❌ Return flight: {ret['flight']} on {fmt_day(ret, tz_name)} is before "
+                f"{outbound['flight']} on {fmt_day(outbound, tz_name)}.")
+    if not ret["dep_airport"]:
+        ret["dep_airport"] = outbound.get("arr_airport")
+    return ret
+
+
+def parse_itinerary(text, now, tz_name, airports):
+    """Parse "UA1234 … [return UA5678 11/21 …]".
+
+    Returns (outbound, return or None), or an error string."""
+    words = (text or "").split()
+    cut = next((i for i, w in enumerate(words) if w.lower() in RETURN_WORDS), None)
+    out = parse_inbound(" ".join(words[:cut]), now, tz_name, airports)
+    if isinstance(out, str) or cut is None:
+        return out if isinstance(out, str) else (out, None)
+    if not words[cut + 1:]:
+        return "🤔 Which flight is the return? e.g. \"… return UA5678 11/21\"."
+    ret = parse_return(out, " ".join(words[cut + 1:]), now, tz_name, airports)
+    return ret if isinstance(ret, str) else (out, ret)
 
 
 def apply_change(trip, text, now, tz_name, airports):
@@ -226,6 +277,8 @@ def new_trip(flight, date, dep_time, dep_airport, inbound, now):
         "inbound": inbound, "source": "manual" if inbound else "aerodatabox",
         "checkpoints": list(CHECKPOINT_HOURS), "last_check": None,
         "created": now, "plane_locked": bool(inbound),
+        # Round trips: both flights share an itinerary id; leg is "out" or "return".
+        "itinerary": None, "leg": None,
         # AeroDataBox bookkeeping: seen = it has listed this flight before,
         # missing = it no longer does (renumbered or cancelled?).
         "seen": False, "missing": False, "replacement": None,
@@ -328,13 +381,64 @@ def cancel(topic, ident, path=None):
         return len(trips) - len(keep)
 
 
+def add_journey(out, ret, path=None):
+    """Store a round trip: both flights, linked by a new itinerary id."""
+    iid = secrets.token_hex(4)
+    out.update(itinerary=iid, leg="out")
+    ret.update(itinerary=iid, leg="return")
+    with TRIPS_LOCK:
+        trips = [t for t in load(path) if not (same_trip(t, out) or same_trip(t, ret))]
+        save(trips + [out, ret], path)
+
+
+def link_return(out, ret, path=None):
+    """Store `ret` as the flight home of the stored trip `out` (it takes on
+    out's sharing). Returns the stored outbound, or None if it's gone."""
+    with TRIPS_LOCK:
+        trips = load(path)
+        stored = next((t for t in trips if same_trip(t, out)), None)
+        if stored is None:
+            return None
+        iid = stored.get("itinerary") or secrets.token_hex(4)
+        stored.update(itinerary=iid, leg="out")
+        ret.update(itinerary=iid, leg="return", shared_with=list(stored.get("shared_with") or []))
+        save([t for t in trips if not same_trip(t, ret)] + [ret], path)
+        return stored
+
+
 def sort_key(t):
     return t.get("dep_time") or date_end(t)
 
 
+def ordered(trips):
+    """Soonest first, with a round trip's flights kept together: each sorts by
+    its journey's first departure, then its own."""
+    starts = {}
+    for t in trips:
+        if t.get("itinerary"):
+            k = (t.get("topic"), t["itinerary"])
+            starts[k] = min(starts.get(k, sort_key(t)), sort_key(t))
+    return sorted(trips, key=lambda t: (starts.get((t.get("topic"), t.get("itinerary")), sort_key(t)), sort_key(t)))
+
+
+def journey(trip, trips):
+    """The flights of trip's round trip in order (outbound first), or [trip]."""
+    if not trip.get("itinerary"):
+        return [trip]
+    return [t for t in ordered(trips) if t.get("topic") == trip.get("topic")
+            and t.get("itinerary") == trip["itinerary"]] or [trip]
+
+
+def split_only(text):
+    """("Mom only", "only") -> ("Mom", True): "only" limits an action to one flight."""
+    words = (text or "").split()
+    rest = [w for w in words if w.lower() != "only"]
+    return " ".join(rest), len(rest) != len(words)
+
+
 def for_topic(topic, path=None):
     """A watcher's trips, soonest first. "trips" numbers them in this order."""
-    return sorted((t for t in load(path) if t["topic"] == topic), key=sort_key)
+    return ordered([t for t in load(path) if t["topic"] == topic])
 
 
 def select(mine, selector, now, tz_name):
@@ -375,13 +479,31 @@ def modify(topic, selector, fn, now, tz_name, path=None):
     """
     with TRIPS_LOCK:
         all_trips = load(path)
-        mine = sorted((t for t in all_trips if t["topic"] == topic), key=sort_key)
+        mine = ordered([t for t in all_trips if t["topic"] == topic])
         trip, rest = select(mine, selector, now, tz_name)
         if trip is None:
             return rest
         reply, keep = fn(trip, rest)
         others = [t for t in all_trips if t is not trip]
         save(others + [trip] if keep else others, path)
+        return reply
+
+
+def modify_legs(topic, selector, fn, now, tz_name, path=None):
+    """Like modify(), for actions that cover a whole round trip ("cancel",
+    "share"): fn(legs, rest_text) gets every flight of the selected trip's
+    journey, or just that one if the text says "only"."""
+    with TRIPS_LOCK:
+        all_trips = load(path)
+        mine = ordered([t for t in all_trips if t["topic"] == topic])
+        trip, rest = select(mine, selector, now, tz_name)
+        if trip is None:
+            return rest
+        rest, only = split_only(rest)
+        legs = [trip] if only else journey(trip, mine)
+        reply, keep = fn(legs, rest)
+        others = [t for t in all_trips if not any(t is l for l in legs)]
+        save(others + legs if keep else others, path)
         return reply
 
 
@@ -408,7 +530,7 @@ def plane_name(trip):
 def describe(trip, tz_name, intro=True):
     """The trip summary sent when it's added, and by "trips"."""
     inb = trip.get("inbound") or {}
-    head = f"🧳 {trip['flight']} · {fmt_day(trip, tz_name)}"
+    head = f"{'↩ Return ' if trip.get('leg') == 'return' else '🧳 '}{trip['flight']} · {fmt_day(trip, tz_name)}"
     if trip.get("dep_time"):
         head += f", departs {fmt_time(trip['dep_time'], tz_name)}"
     if trip.get("dep_airport"):
@@ -449,8 +571,11 @@ def describe_all(trips, tz_name):
     if not trips:
         return "No trips. Send \"inbound UA1234 N38473 dep 4:30pm\" to track the plane flying in for your flight."
     parts = [f"{n}. " + describe(t, tz_name, intro=False) for n, t in enumerate(trips, 1)]
-    return "\n\n".join(parts) + ("\n\nChange one with \"change 1 …\" (new flight number, plane, "
-                                  "time, date or airport) or remove it with \"cancel 1\".")
+    tail = ("\n\nChange one with \"change 1 …\" (new flight number, plane, "
+            "time, date or airport) or remove it with \"cancel 1\".")
+    if any(len(journey(t, trips)) > 1 for t in trips):
+        tail += " Cancelling or sharing a flight covers its return too; add \"only\" for just that one."
+    return "\n\n".join(parts) + tail
 
 
 # ------------------------------------------------------------ AeroDataBox
@@ -703,14 +828,21 @@ def share_with(trip, topics, own_topic):
     return added
 
 
-def share_announcement(trip, owner, tz_name):
-    """What a watcher gets when a trip is shared with them."""
-    when = f"departs {fmt_time(trip['dep_time'], tz_name)}" if trip.get("dep_time") else ""
-    where = f"from {trip['dep_airport']}" if trip.get("dep_airport") else ""
-    detail = " ".join(x for x in (when, where) if x)
+def share_announcement(legs, owner, tz_name):
+    """What a watcher gets when a trip (one flight, or both of a round trip) is
+    shared with them: one note, however many flights."""
+    lines = []
+    for trip in legs:
+        when = f"departs {fmt_time(trip['dep_time'], tz_name)}" if trip.get("dep_time") else ""
+        where = f"from {trip['dep_airport']}" if trip.get("dep_airport") else ""
+        detail = " ".join(x for x in (when, where) if x)
+        lines.append(f"{'Return: ' if trip.get('leg') == 'return' and len(legs) > 1 else ''}"
+                     f"{trip['flight']} · {fmt_day(trip, tz_name)}{', ' + detail if detail else ''}.")
+    if len(legs) > 1:
+        return (f"📣 {owner} shared a round trip with you", "\n".join(lines)
+                + "\nYou'll get an alert when each flight departs and when it lands.", 3)
     return (f"📣 {owner} shared a flight with you",
-            f"{trip['flight']} · {fmt_day(trip, tz_name)}{', ' + detail if detail else ''}.\n"
-            "You'll get an alert when it departs and when it lands.", 3)
+            lines[0] + "\nYou'll get an alert when it departs and when it lands.", 3)
 
 
 def share_note_messages(trip, notes, owner, tz_name):

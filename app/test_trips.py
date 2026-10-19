@@ -440,7 +440,7 @@ class ShareTest(unittest.TestCase):
         self.assertFalse(trips.own_live(self.t, ts(2026, 11, 14, 18)))     # done once it has landed
 
     def test_messages_for_family(self):
-        title, msg, _ = trips.share_announcement(self.t, "Sam", TZ)
+        title, msg, _ = trips.share_announcement([self.t], "Sam", TZ)
         self.assertEqual(title, "📣 Sam shared a flight with you")
         self.assertIn("UA1234 · Sat Nov 14, departs 4:05pm from KIAD", msg)
         notes = [("dep_change", ts(2026, 11, 14, 16, 5), ts(2026, 11, 14, 17)), ("plane_change", "N1", "N2"),
@@ -453,3 +453,103 @@ class ShareTest(unittest.TestCase):
     def test_share_commands_parse(self):
         self.assertEqual(commands.parse("share 1 Mom & Dad")[:2], ("share", "1 Mom & Dad"))
         self.assertEqual(commands.parse("unshare 2 Dad")[:2], ("unshare", "2 Dad"))
+
+
+class ItineraryTest(unittest.TestCase):
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+
+    def tearDown(self):
+        os.unlink(self.path)
+
+    def parse(self, text):
+        return trips.parse_itinerary(text, NOON, TZ, AIR)
+
+    def store(self, text, topic="sam"):
+        out, ret = self.parse(text)
+        out["topic"] = topic
+        if ret is None:
+            trips.add(out, self.path)
+            return out
+        ret["topic"] = topic
+        trips.add_journey(out, ret, self.path)
+        return out, ret
+
+    def test_one_flight_is_unchanged(self):
+        out, ret = self.parse("UA1234 N38473 dep 4:30pm")
+        self.assertIsNone(ret)
+        self.assertEqual(out["flight"], "UA1234")
+
+    def test_outbound_and_return(self):
+        out, ret = self.parse("UA1234 11/14 return UA5678 11/21")
+        self.assertEqual((out["flight"], out["date"]), ("UA1234", "2026-11-14"))
+        self.assertEqual((ret["flight"], ret["date"], ret["source"]), ("UA5678", "2026-11-21", "aerodatabox"))
+
+    def test_manual_legs_with_tails_and_times(self):
+        out, ret = self.parse("UA1234 N38473 dep 4:30pm 11/14 from IAD returning UA 5678 N12345 11/21 dep 6pm from LAS")
+        self.assertEqual((out["dep_airport"], out["inbound"]["tail"]), ("KIAD", "N38473"))
+        self.assertEqual(out["dep_time"], ts(2026, 11, 14, 16, 30))
+        self.assertEqual((ret["flight"], ret["dep_airport"], ret["inbound"]["tail"]), ("UA5678", "KLAS", "N12345"))
+        self.assertEqual(ret["dep_time"], ts(2026, 11, 21, 18))
+
+    def test_return_errors(self):
+        self.assertIn("Which day is UA5678", self.parse("UA1234 11/14 return UA5678"))
+        self.assertTrue(self.parse("UA1234 11/14 return UA5678").startswith("🤔 Return flight:"))
+        self.assertIn("is before", self.parse("UA1234 11/14 return UA5678 11/10"))
+        self.assertIn("Which flight is the return", self.parse("UA1234 11/14 return"))
+        self.assertTrue(self.parse("UA1234 11/14 return banana 11/20").startswith("❌ Return flight:"))
+
+    def test_return_leaves_from_where_the_outbound_lands(self):
+        out = self.parse("UA1234 11/14")[0]
+        out["arr_airport"] = "KLAS"
+        self.assertEqual(trips.parse_return(out, "UA5678 11/21", NOON, TZ, AIR)["dep_airport"], "KLAS")
+        self.assertEqual(trips.parse_return(out, "UA5678 11/21 from ORD", NOON, TZ, AIR)["dep_airport"], "KORD")
+
+    def test_legs_numbered_together(self):
+        self.store("AA1 11/16")                       # between the two flights of the round trip
+        self.store("UA1234 11/14 return UA5678 11/21")
+        self.store("DL89 10/22")
+        mine = trips.for_topic("sam", self.path)
+        self.assertEqual([t["flight"] for t in mine], ["DL89", "UA1234", "UA5678", "AA1"])
+        self.assertEqual([t["leg"] for t in mine], [None, "out", "return", None])
+        self.assertEqual(mine[1]["itinerary"], mine[2]["itinerary"])
+        self.assertEqual([t["flight"] for t in trips.journey(mine[2], mine)], ["UA1234", "UA5678"])
+        listing = trips.describe_all(mine, TZ)
+        self.assertIn("3. ↩ Return UA5678 · Sat Nov 21", listing)
+        self.assertIn('add "only"', listing)
+
+    def test_cancel_covers_both_unless_only(self):
+        self.store("UA1234 11/14 return UA5678 11/21")
+        gone = lambda legs, rest: (" ".join(t["flight"] for t in legs), False)  # noqa: E731
+        self.assertEqual(trips.modify_legs("sam", "2 only", gone, NOON, TZ, self.path), "UA5678")
+        self.assertEqual([t["flight"] for t in trips.for_topic("sam", self.path)], ["UA1234"])
+        os.unlink(self.path)
+        self.store("UA1234 11/14 return UA5678 11/21")
+        self.assertEqual(trips.modify_legs("sam", "UA5678", gone, NOON, TZ, self.path), "UA1234 UA5678")
+        self.assertEqual(trips.for_topic("sam", self.path), [])
+
+    def test_link_return_to_existing_trip(self):
+        out = self.store("UA1234 11/14")
+        trips.modify_legs("sam", "1", lambda legs, r: (trips.share_with(legs[0], ["mom"], "sam"), True),
+                          NOON, TZ, self.path)
+        ret = trips.parse_return(out, "UA5678 11/21", NOON, TZ, AIR)
+        ret["topic"] = "sam"
+        stored = trips.link_return(out, ret, self.path)
+        self.assertEqual(stored["leg"], "out")
+        mine = trips.for_topic("sam", self.path)
+        self.assertEqual([(t["flight"], t["leg"]) for t in mine], [("UA1234", "out"), ("UA5678", "return")])
+        self.assertEqual(mine[1]["shared_with"], ["mom"])              # takes on the outbound's sharing
+        self.assertIsNone(trips.link_return({"topic": "sam", "flight": "XX1", "date": "2026-11-14"}, ret, self.path))
+
+    def test_one_note_for_a_shared_round_trip(self):
+        out, ret = self.parse("UA1234 N1 11/14 dep 4:05pm from IAD return UA5678 N2 11/21 dep 6pm from LAS")
+        out["leg"], ret["leg"] = "out", "return"
+        title, msg, _ = trips.share_announcement([out, ret], "Sam", TZ)
+        self.assertEqual(title, "📣 Sam shared a round trip with you")
+        self.assertIn("UA1234 · Sat Nov 14, departs 4:05pm from KIAD.\nReturn: UA5678 · Sat Nov 21, departs 6:00pm from KLAS.", msg)
+
+    def test_return_command_parse(self):
+        self.assertEqual(commands.parse("return 1 UA5678 11/21")[:2], ("return", "1 UA5678 11/21"))
+        self.assertEqual(commands.parse("inbound UA1 11/14 return UA2 11/21")[:2], ("inbound", "UA1 11/14 return UA2 11/21"))
+        self.assertEqual(trips.split_only("Mom only"), ("Mom", True))
