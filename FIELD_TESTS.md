@@ -48,6 +48,7 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 | R12 | Trip clears itself after departure | | |
 | R13 | AeroDataBox requests for a month-out trip stay around 20 | | Check the RapidAPI dashboard |
 | R14 | Outbound **and** return trips for the same journey both work | ⏳ | Booked trip next month |
+| R15 | Round trip entered in one step (`inbound … return …` or the Return flight row): both legs listed together, return leaves from the outbound's destination, `share`/`cancel` cover both (`only` for one) | | 0.16.0 |
 
 ## 4. Sharing and other people's phones
 
@@ -98,7 +99,7 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 
 ## Ideas from testing
 
-- **Itineraries:** enter the outbound and return flights together (and share both at once) instead of two separate trips. From the 2026-10-19 test.
+- **Itineraries:** enter the outbound and return flights together (and share both at once) instead of two separate trips. From the 2026-10-19 test. Done in 0.16.0 (round trips); test as R15, e.g. by linking next month's two trips with `return 1 …`.
 
 ## Log
 
