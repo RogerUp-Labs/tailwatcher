@@ -5,7 +5,7 @@ password is used for these requests only and never stored; what TailWatcher
 keeps is a token for its own NTFY user.
 
 Setup: (1) check the admin login, (2) create (or reset) the "tailwatcher"
-user, (3) give it Read-Write on tw-*, (4) phones: "open" grants anonymous
+user, (3) give it Read-Write on tw-* (and tailwatcher* for pre-0.12 topics), (4) phones: "open" grants anonymous
 Read-Write on tw-* (subscribe with just the link; the topics are unguessable)
 or "login" removes that grant and gives each person their own account,
 (5) mint a token for the tailwatcher user.
@@ -20,6 +20,7 @@ import urllib.request
 
 USER = "tailwatcher"
 TOPICS = "tw-*"
+OLD_TOPICS = "tailwatcher*"  # watchers made before 0.12 (TailWatcher's user only, never anonymous)
 ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
@@ -87,7 +88,10 @@ def setup(base, admin_password, phones="open", admin_user="admin", call=_call):
     status, _ = call(base, "PUT", "/v1/users/access", admin,
                      {"username": USER, "topic": TOPICS, "permission": "read-write"})
     _check(status, "grant TailWatcher access")
-    steps.append(f"Gave it access to {TOPICS} topics")
+    status, _ = call(base, "PUT", "/v1/users/access", admin,
+                     {"username": USER, "topic": OLD_TOPICS, "permission": "read-write"})
+    _check(status, "grant TailWatcher access to older topics")
+    steps.append(f"Gave it access to {TOPICS} topics (and {OLD_TOPICS} from older versions)")
 
     if phones == "open":
         status, _ = call(base, "PUT", "/v1/users/access", admin,

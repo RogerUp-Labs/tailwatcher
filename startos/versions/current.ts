@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.19.0:0',
+  version: '0.19.1:0',
   releaseNotes: {
     en_US:
-      'TailWatcher can now also run without a Start9, as an ordinary Docker container on a Synology, Unraid or TrueNAS NAS or any computer with Docker, with alerts through ntfy.sh or an ntfy server you run yourself. See Running without a Start9 in the instructions. Nothing changes on StartOS, apart from a few hints that now point at Settings in the Web UI.',
+      'Fixed a misleading "can\'t read topic (HTTP 403)" message for new watchers on this server\'s NTFY: it told you to grant access on tailwatcher*, but watcher topics now start with tw-. The message now names the right permission and points to "Set up NTFY for me" in ⚙ Settings, which now also covers topics made by older versions.',
   },
   migrations: {
     up: async () => {},

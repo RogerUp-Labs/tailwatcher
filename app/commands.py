@@ -358,6 +358,21 @@ def remove_expired(path, now=None):
 # ------------------------------------------------------------ listening
 
 
+def topic_pattern(topic):
+    """The NTFY permission pattern that covers a watcher topic: tw-* for
+    topics made since 0.12, tailwatcher* for older ones."""
+    if topic.startswith("tw-"):
+        return "tw-*"
+    if topic.startswith("tailwatcher"):
+        return "tailwatcher*"
+    return topic
+
+
+def access_hint(topic):
+    return ('open ⚙ Settings and run "Set up NTFY for me" again, or in NTFY give the user '
+            f"whose token TailWatcher uses Read-Write on {topic_pattern(topic)}")
+
+
 class TopicListener(threading.Thread):
     """Streams one ntfy topic and hands each human-written message to a callback."""
 
@@ -392,8 +407,8 @@ class TopicListener(threading.Thread):
             except urllib.error.HTTPError as e:
                 if e.code in (401, 403):
                     self.on_status(self.topic, (
-                        f"text commands can't read topic {self.topic} (HTTP {e.code}); in NTFY, "
-                        "give the user whose token TailWatcher uses Read-Write on tailwatcher*"))
+                        f"text commands can't read topic {self.topic} (HTTP {e.code}); "
+                        + access_hint(self.topic)))
                     delay = 60
                 else:
                     log.warning("listening on %s: %s", self.topic, e)

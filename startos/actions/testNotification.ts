@@ -57,7 +57,7 @@ export const testNotification = sdk.Action.withoutInput(
           if (res.ok) return { w, ok: true, detail: 'sent' }
           const detail =
             res.status === 401 || res.status === 403
-              ? `refused (HTTP ${res.status}): the token has no access to this topic. In NTFY, give the token's user Read-Write on "tailwatcher*" with Grant User Topic Access.`
+              ? `refused (HTTP ${res.status}): the token has no access to this topic. Open ⚙ Settings in the Web UI and run "Set up NTFY for me" again, or in NTFY give the token's user Read-Write on "${w.topic.startsWith('tw-') ? 'tw-*' : 'tailwatcher*'}".`
               : `HTTP ${res.status}: ${(await res.text()).slice(0, 120)}`
           return { w, ok: false, detail }
         } catch (e) {

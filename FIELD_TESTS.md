@@ -113,3 +113,4 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 
 - **2026-10-19:** Watched a tail number; got the takeoff alert and the landing alert, both accurate (T1, T3). Tapping the alert opened the plane on the live map (T6). Started tracking an outbound and return commercial flight for next month (R14).
 - **2026-10-20:** N806X (CRJ7, callsign SCAN6) dropped off radar on final into KECP; got "likely landed · 3 nm from KECP – Northwest Florida Beaches Intl · 625 ft · 137 kt · hdg 340° · Signal lost at low altitude" with the live-map link (T4).
+- **2026-10-20:** Creating an invite link for a new watcher (local NTFY) showed "text commands can't read topic tw-dad-… (HTTP 403)": the NTFY token only had Read-Write on tailwatcher*, from setup before topics started with tw-. Fixed the hint in 0.19.1; rerun "Set up NTFY for me".

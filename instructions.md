@@ -223,7 +223,7 @@ Install the ntfy app first, then tap the link again. If it still doesn't open (s
 ### Text commands get no reply
 
 - Make sure **Text commands** is on in **⚙ Settings**.
-- With this server's NTFY, run **Set up NTFY for me** again. Watchers created before version 0.12 have `tailwatcher_…` topics, which need their old NTFY permissions or a new topic (below).
+- With this server's NTFY, run **Set up NTFY for me** in **⚙ Settings** again. That's also the fix when **System** says text commands "can't read topic" (HTTP 403): the token TailWatcher uses has no access to that topic, usually because it was set up by hand before topics started with `tw-`. It covers older `tailwatcher_…` topics too.
 
 ### Give someone a new topic
 
