@@ -103,6 +103,11 @@ class PageTest(unittest.TestCase):
         linked = set(re.findall(r'data-section="([a-z0-9-]+)"', self.page)) | {"for-people-getting-alerts"}
         self.assertEqual(linked - slugs, set())
 
+    def test_help_is_a_full_page_that_opens_before_the_state_loads(self):
+        self.assertIn('<dialog id="help" class="help-page"', self.page)
+        body = self.js[self.js.index("function onAction(btn) {"):]
+        self.assertLess(body.index('"help"'), body.index("if (!LAST) return;"))
+
     def test_helpers_used_in_templates_are_defined(self):
         import re
         called = set(re.findall(r"\$\{([a-zA-Z_]\w*)\(", self.js))

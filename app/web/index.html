@@ -270,15 +270,41 @@ dialog.wide { width: min(560px, calc(100vw - 32px)); }
 .steps-done { margin: 0; padding-left: 18px; font-size: 13px; color: var(--ok); display: grid; gap: 3px; }
 .creds { font-family: var(--mono); font-size: 13px; background: var(--brand-soft); padding: 8px 10px; border-radius: 8px; overflow-wrap: anywhere; }
 .status-line { font-size: 13px; color: var(--text-2); }
-dialog.help { width: min(720px, calc(100vw - 24px)); }
-.help-top { position: sticky; top: 0; background: var(--surface); padding-bottom: 8px; z-index: 1; display: grid; gap: 8px; }
-.help-top input { font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); width: 100%; }
-.help-toc { display: flex; flex-wrap: wrap; gap: 6px; }
-.help-toc a { font-size: 12.5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; }
-.guide { font-size: 14.5px; line-height: 1.55; color: var(--text); max-height: min(68vh, 900px); overflow: auto; padding-right: 4px; }
-.guide h2 { font-size: 18px; margin: 22px 0 8px; text-transform: none; letter-spacing: 0; color: var(--text); display: block; font-family: inherit; font-weight: 700; }
-.guide section:first-child h2 { margin-top: 4px; }
-.guide h3 { font-size: 15.5px; margin: 16px 0 6px; }
+/* ? Help: a full-window page over the dashboard (a modal dialog, so it also
+   opens on top of a form and closing it goes back there), linkable as #help/<section>. */
+dialog.help-page { width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; background: var(--bg); }
+dialog.help-page[open] { display: flex; flex-direction: column; }
+body:has(dialog.help-page[open]) { overflow: hidden; }
+.hp-bar { display: flex; align-items: center; gap: 10px; padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left)); padding-top: max(10px, env(safe-area-inset-top)); background: var(--surface); border-bottom: 1px solid var(--border); flex: none; }
+.hp-bar h3 { margin: 0; font-size: 17px; flex: none; }
+.hp-bar input { font: inherit; font-size: 15px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); flex: 1; min-width: 0; max-width: 420px; margin-left: auto; }
+.hp-bar .hp-tab { font-size: 13px; white-space: nowrap; }
+.hp-bar .hp-contents { display: none; }
+.hp-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 260px minmax(0, 1fr); position: relative; }
+.hp-toc { overflow: auto; overscroll-behavior: contain; padding: 18px 12px 24px 16px; border-right: 1px solid var(--border); background: var(--surface); font-size: 14px; }
+.hp-toc ul { list-style: none; margin: 0; padding: 0; }
+.hp-toc ul ul { margin: 2px 0 6px 10px; border-left: 1px solid var(--border); }
+.hp-toc a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--text-2); text-decoration: none; line-height: 1.3; }
+.hp-toc ul ul a { font-size: 13px; padding: 3px 10px; color: var(--text-3); }
+.hp-toc a:hover { background: var(--surface-2); color: var(--text); }
+.hp-toc a[aria-current="true"] { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.hp-toc li.hidden { display: none; }
+.hp-main { overflow: auto; overscroll-behavior: contain; padding: 8px 24px calc(48px + env(safe-area-inset-bottom)); }
+.guide { font-size: 15px; line-height: 1.6; color: var(--text); max-width: 760px; margin: 0 auto; }
+.guide section { scroll-margin-top: 12px; }
+@media (max-width: 760px) {
+  .hp-body { grid-template-columns: minmax(0, 1fr); }
+  .hp-bar { flex-wrap: wrap; row-gap: 8px; }
+  .hp-bar input { order: 1; flex-basis: 100%; max-width: none; margin-left: 0; }
+  .hp-bar .hp-contents { display: inline-block; margin-left: auto; }
+  .hp-bar .hp-tab { display: none; }
+  .hp-toc { display: none; position: absolute; inset: 0; z-index: 2; border-right: 0; }
+  .hp-body.toc-open .hp-toc { display: block; }
+  .hp-main { padding: 4px 16px calc(40px + env(safe-area-inset-bottom)); }
+}
+.guide h2 { font-size: 22px; margin: 32px 0 10px; text-transform: none; letter-spacing: 0; color: var(--text); display: block; font-family: inherit; font-weight: 700; }
+.guide section:first-child h2 { margin-top: 16px; }
+.guide h3 { font-size: 17px; margin: 22px 0 6px; }
 .guide p { margin: 8px 0; }
 .guide ul, .guide ol { margin: 6px 0; padding-left: 22px; }
 .guide li { margin: 3px 0; }
@@ -417,6 +443,7 @@ dialog.help { width: min(720px, calc(100vw - 24px)); }
   <footer id="foot"></footer>
 </main>
 <dialog id="dlg" aria-labelledby="dlg-title"><form id="dlg-form" novalidate></form></dialog>
+<dialog id="help" class="help-page" aria-labelledby="help-title"></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -1153,18 +1180,31 @@ function parseGuide(md) {
     text: (sec.title + " " + sec.lines.join(" ")).replace(/[`*|>#]/g, " ").replace(/\s+/g, " ")}));
 }
 
+// Help is its own full window: the URL becomes #help/<section>, so Back closes
+// it, a section can be bookmarked or opened in a new tab, and a page loaded
+// with #help opens straight into it.
+let HELP_PUSHED = false;  // we added the #help history entry (so closing goes Back)
+const helpHash = () => { const m = /^#help(?:\/([a-z0-9-]*))?$/.exec(location.hash); return m ? (m[1] || "") : null; };
+
 async function openHelp(target) {
-  const form = $("dlg-form"), dlg = $("dlg");
-  dlg.classList.add("help");
-  form.innerHTML = `<div class="help-top"><h3 id="dlg-title">Help</h3>
-      <input type="search" id="help-q" placeholder="Search the guide, e.g. iphone, renumbered, share" aria-label="Search the guide" autocomplete="off">
-      <div class="help-toc" id="help-toc"></div></div>
-    <div class="guide" id="guide">Loading…</div>
-    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Close</button></div>`;
-  form.onsubmit = (e) => e.preventDefault();
-  $("dlg-cancel").onclick = () => dlg.close();
-  dlg.addEventListener("close", () => dlg.classList.remove("help"), {once: true});
-  dlg.showModal();
+  const dlg = $("help");
+  if (!dlg.open) {
+    dlg.innerHTML = `<div class="hp-bar">
+        <button type="button" class="btn" id="help-close">← Back</button>
+        <h3 id="help-title">Help</h3>
+        <button type="button" class="btn hp-contents" id="help-contents" aria-expanded="false" aria-controls="help-toc">☰ Contents</button>
+        <input type="search" id="help-q" placeholder="Search the guide, e.g. iphone, renumbered, share" aria-label="Search the guide" autocomplete="off">
+        <a class="hp-tab" id="help-tab" href="#help" target="_blank" rel="noopener">Open in new tab ↗</a>
+      </div>
+      <div class="hp-body" id="help-body">
+        <nav class="hp-toc" id="help-toc" aria-label="Contents"></nav>
+        <div class="hp-main" id="help-main"><div class="guide" id="guide">Loading…</div></div>
+      </div>`;
+    $("help-close").onclick = () => dlg.close();
+    $("help-contents").onclick = () => toggleToc();
+    dlg.showModal();
+    if (helpHash() === null) { history.pushState(null, "", "#help" + (target ? "/" + target : "")); HELP_PUSHED = true; }
+  }
   if (!GUIDE) {
     try {
       const url = location.origin + location.pathname.replace(/[^/]*$/, "") + "guide.md";
@@ -1176,13 +1216,27 @@ async function openHelp(target) {
       return;
     }
   }
-  $("help-toc").innerHTML = GUIDE.filter((x) => x.level === 2).map((x) => `<a href="#h-${x.id}" data-help-jump="${x.id}">${esc(x.title)}</a>`).join("");
-  $("guide").innerHTML = GUIDE.map((x) => `<section id="h-${x.id}" data-level="${x.level}">
+  if (!dlg.open) return;  // closed while the guide was loading
+  if (!$("guide").dataset.ready) renderHelp();
+  if (target && $("h-" + target)) { $("help-q").value = ""; filterHelp(""); jumpTo(target); }
+  else if (!target && matchMedia("(hover: hover)").matches) $("help-q").focus();
+}
+
+function renderHelp() {
+  const g = $("guide");
+  g.dataset.ready = "1";
+  // Contents: every ## topic, with its ### questions nested under it.
+  const tops = [];
+  for (const x of GUIDE) if (x.level === 2 || !tops.length) tops.push({...x, subs: []}); else tops[tops.length - 1].subs.push(x);
+  const link = (x) => `<a href="#help/${x.id}" data-help-jump="${x.id}">${esc(x.title)}</a>`;
+  $("help-toc").innerHTML = `<ul>${tops.map((t) => `<li id="toc-${t.id}">${link(t)}${t.subs.length ? `<ul>${t.subs.map((s) => `<li id="toc-${s.id}">${link(s)}</li>`).join("")}</ul>` : ""}</li>`).join("")}</ul>`;
+  g.innerHTML = GUIDE.map((x) => `<section id="h-${x.id}" data-level="${x.level}">
       ${x.id === "for-people-getting-alerts" ? `<button type="button" class="btn copy-for" id="help-copy">Copy for them</button>` : ""}
       <h${x.level}>${esc(x.title)}</h${x.level}>${x.html}</section>`).join("");
   $("help-toc").onclick = (e) => {
     const a = e.target.closest("[data-help-jump]");
-    if (a) { e.preventDefault(); $("help-q").value = ""; filterHelp(""); jumpTo(a.dataset.helpJump); }
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;  // modified clicks open a new tab as usual
+    e.preventDefault(); $("help-q").value = ""; filterHelp(""); toggleToc(false); jumpTo(a.dataset.helpJump);
   };
   if ($("help-copy")) $("help-copy").onclick = async () => {
     const sec = GUIDE.find((x) => x.id === "for-people-getting-alerts");
@@ -1191,31 +1245,68 @@ async function openHelp(target) {
     catch (e) { toast("Couldn't copy here; select the text instead."); }
   };
   $("help-q").oninput = (e) => filterHelp(e.target.value);
-  if (target && $("h-" + target)) jumpTo(target);
-  else if (matchMedia("(hover: hover)").matches) $("help-q").focus();
+  $("help-main").onscroll = () => markCurrent();
+  markCurrent();
+}
+
+function toggleToc(open) {
+  const body = $("help-body"), on = open ?? !body.classList.contains("toc-open");
+  body.classList.toggle("toc-open", on);
+  $("help-contents").setAttribute("aria-expanded", String(on));
 }
 
 function jumpTo(id) {
-  // Scroll only the guide (scrollIntoView would also scroll the dialog and page).
-  const g = $("guide"), sec = $("h-" + id);
-  g.scrollTop += sec.getBoundingClientRect().top - g.getBoundingClientRect().top;
+  // Scroll only the guide's own pane (scrollIntoView would also scroll the page).
+  const m = $("help-main"), sec = $("h-" + id);
+  m.scrollTop += sec.getBoundingClientRect().top - m.getBoundingClientRect().top - 8;
+  history.replaceState(null, "", "#help/" + id);
+  markCurrent(id);
+}
+
+function markCurrent(id) {
+  // The section at the top of the pane gets highlighted in Contents.
+  if (!GUIDE || !$("help-main")) return;
+  if (!id) {
+    const top = $("help-main").getBoundingClientRect().top + 40;
+    for (const x of GUIDE) {
+      const el = $("h-" + x.id);
+      if (!el.classList.contains("hidden") && el.getBoundingClientRect().top <= top) id = x.id;
+    }
+    id ||= GUIDE[0].id;
+  }
+  $("help-toc").querySelectorAll("a[aria-current]").forEach((a) => a.removeAttribute("aria-current"));
+  const a = $("help-toc").querySelector(`#toc-${id} > a`);
+  if (a) { a.setAttribute("aria-current", "true"); if (!$("help-body").classList.contains("toc-open")) keepVisible(a); }
+  $("help-tab").href = "#help/" + id;
+}
+
+function keepVisible(a) {
+  const toc = $("help-toc"), r = a.getBoundingClientRect(), box = toc.getBoundingClientRect();
+  if (r.top < box.top) toc.scrollTop -= box.top - r.top + 8;
+  else if (r.bottom > box.bottom) toc.scrollTop += r.bottom - box.bottom + 8;
 }
 
 function filterHelp(q) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  let shown = 0, parent = null;
+  let shown = 0, parent = null, parentToc = null;
   for (const x of GUIDE) {
-    const el = $("h-" + x.id);
-    if (x.level === 2) parent = el;
+    const el = $("h-" + x.id), li = $("toc-" + x.id);
+    if (x.level === 2) { parent = el; parentToc = li; }
     const hit = !words.length || words.every((w) => x.text.toLowerCase().includes(w));
     el.classList.toggle("hidden", !hit);
-    if (hit) { shown++; if (x.level === 3 && parent) parent.classList.remove("hidden"); }
+    if (li) li.classList.toggle("hidden", !hit);
+    if (hit) {
+      shown++;
+      if (x.level === 3) { if (parent) parent.classList.remove("hidden"); if (parentToc) parentToc.classList.remove("hidden"); }
+    }
     el.querySelectorAll("mark").forEach((m) => m.replaceWith(m.textContent));
     if (hit && words.length) highlight(el, words);
   }
   const none = $("help-none");
-  if (!shown && !none) $("guide").insertAdjacentHTML("beforeend", `<p id="help-none" class="muted">Nothing found. Try another word, or browse the topics above.</p>`);
+  if (!shown && !none) $("guide").insertAdjacentHTML("beforeend", `<p id="help-none" class="muted">Nothing found. Try another word, or browse the Contents.</p>`);
   else if (shown && none) none.remove();
+  if (words.length) $("help-main").scrollTop = 0;
+  markCurrent();
 }
 
 function highlight(root, words) {
@@ -1323,6 +1414,7 @@ function openSettings() {
 }
 
 function onAction(btn) {
+  if (btn.dataset.act === "help") return openHelp(btn.dataset.section);  // works even before the state loads
   if (!LAST) return;
   const {act, topic, number, ident} = btn.dataset;
   const w = LAST.watchers.find((x) => x.topic === topic);
@@ -1344,7 +1436,6 @@ function onAction(btn) {
   if (act === "add-watcher") return watcherForm(null);
   if (act === "connect" && w) return connectPhone(w);
   if (act === "settings") return openSettings();
-  if (act === "help") return openHelp(btn.dataset.section);
   if (act === "edit-watcher" && w) return watcherForm(w);
   if (act === "add-aircraft" && w) return aircraftForm(w, null);
   if (act === "edit-aircraft" && w) return aircraftForm(w, w.aircraft.find((a) => a.ident === ident));
@@ -1392,6 +1483,16 @@ document.addEventListener("click", (e) => {
   if (act) onAction(act);
 });
 applyTheme(THEME, false);
+$("help").addEventListener("close", () => {
+  if (helpHash() !== null) { if (HELP_PUSHED) history.back(); else history.replaceState(null, "", location.pathname + location.search); }
+  HELP_PUSHED = false;
+});
+window.addEventListener("popstate", () => {
+  const t = helpHash();
+  if (t === null) { if ($("help").open) { HELP_PUSHED = false; $("help").close(); } }
+  else openHelp(t);
+});
+if (helpHash() !== null) openHelp(helpHash());
 document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lastLoad > 15000) load(); });
 setInterval(() => { if (!document.hidden) load(); }, 20000);
 load();
