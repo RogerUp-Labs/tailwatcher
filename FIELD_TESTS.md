@@ -11,7 +11,7 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 | T1 | Takeoff alert for a watched tail (airport with ground coverage → "departed") | ✅ | 2026-10-19 |
 | T2 | "Is airborne" alert from a small field with no ground coverage | | |
 | T3 | Landing alert ("landed") with Landing alerts on | ✅ | 2026-10-19 |
-| T4 | "Likely landed" (dropped off radar below 3,000 ft) | | |
+| T4 | "Likely landed" (dropped off radar below 3,000 ft) | ✅ | 2026-10-20 |
 | T5 | No landing alert for a watcher with Landing alerts off | | |
 | T6 | Tapping an alert opens the plane on the live map | ✅ | 2026-10-19 |
 | T7 | A plane already flying when added alerts within seconds | | |
@@ -104,3 +104,4 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 ## Log
 
 - **2026-10-19:** Watched a tail number; got the takeoff alert and the landing alert, both accurate (T1, T3). Tapping the alert opened the plane on the live map (T6). Started tracking an outbound and return commercial flight for next month (R14).
+- **2026-10-20:** N806X (CRJ7, callsign SCAN6) dropped off radar on final into KECP; got "likely landed · 3 nm from KECP – Northwest Florida Beaches Intl · 625 ft · 137 kt · hdg 340° · Signal lost at low altitude" with the live-map link (T4).
