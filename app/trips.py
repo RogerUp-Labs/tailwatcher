@@ -67,7 +67,7 @@ LANDED_NM = 5           # on the ground within this of your airport = arrived
 STOP_NM = 50            # your own flight near a stop on its route: that's the stop, not your landing
 CONNECT_TIGHT_MIN = 40  # warn when you'll have less than this to make a connecting flight
 CONNECT_MISS_MIN = 15   # ...and again at this, as a likely miss
-MAX_LEGS = 4            # connecting flights in a row, each way
+MAX_LEGS = 8            # flights in a row each way (a sanity cap: each costs AeroDataBox requests)
 KEEP_AFTER_DEP_H = 3    # drop a trip this long after its departure
 KEEP_UNDATED_H = 36     # ...or this long after it was added, with no departure time
 
@@ -260,6 +260,12 @@ def parse_connection(prev, text, now, tz_name, airports):
         return (f"❌ Connection: {t['flight']} on {fmt_day(t, tz_name)} is before "
                 f"{prev['flight']} on {fmt_day(prev, tz_name)}.")
     return t
+
+
+def form_prefix(base, n):
+    """The Web UI trip form's field prefix for connection n (0-based) after
+    the outbound (base "") or the return (base "ret_"): conn_, conn2_, conn3_ …"""
+    return f"{base}conn_" if n == 0 else f"{base}conn{n + 1}_"
 
 
 def split_on(words, separators):

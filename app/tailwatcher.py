@@ -47,7 +47,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.19.1"
+VERSION = "0.20.3"
 # "startos" (main.ts sets it) or "docker" (the Dockerfile's default): only
 # changes setup hints and whether the dashboard password starts on.
 PLATFORM = os.environ.get("TW_PLATFORM", "startos")
@@ -1145,11 +1145,15 @@ def run():
                     return 400, {"ok": False, "message": "Bad request."}
                 has_return = bool(str(data.get("ret_flight") or "").strip())
                 has = lambda prefix: bool(str(data.get(prefix + "flight") or "").strip())  # noqa: E731
+                conns = lambda base: [p for p in (trips.form_prefix(base, n) for n in range(trips.MAX_LEGS - 1))  # noqa: E731
+                                      if has(p)]
+                if conns("ret_") and not has_return and op in ("add", "change"):
+                    return 400, {"ok": False, "message": "Fill in the return flight before its connections."}
                 if op == "add":
-                    text = trip_text(data) + (" then " + trip_text(data, prefix="conn_") if has("conn_") else "")
+                    text = trip_text(data) + "".join(" then " + trip_text(data, prefix=p) for p in conns(""))
                     if has_return:
                         text += " return " + trip_text(data, prefix="ret_") \
-                            + (" then " + trip_text(data, prefix="ret_conn_") if has("ret_conn_") else "")
+                            + "".join(" then " + trip_text(data, prefix=p) for p in conns("ret_"))
                     msg = on_inbound(topic, text)
                     if share and not msg.startswith(("❌", "🤔", "Tell me your flight")):
                         flight = flights.parse_flight(str(data.get("flight") or ""))
@@ -1165,11 +1169,24 @@ def run():
                         msg = on_return(topic, f"{number} {trip_text(data, prefix='ret_')}")
                         if msg.startswith(("❌", "🤔", "🤷")):
                             return 400, {"ok": False, "message": msg}
-                    if has("conn_"):  # nor does adding a connection after it
-                        added = on_connect(topic, f"{number} {trip_text(data, prefix='conn_')}")
-                        if added.startswith(("❌", "🤔", "🤷")):
-                            return 400, {"ok": False, "message": f"{added}\n(The return flight was added.)" if msg else added}
-                        msg = f"{msg}\n{added}".strip()
+                    # Connections go in each after the last: the return's first (they come
+                    # after this flight, so never move its number), then this flight's.
+                    chains = [("", number)]
+                    if has_return and conns("ret_"):
+                        mine = trips.for_topic(topic)
+                        legs = trips.journey(mine[number - 1], mine) if 0 < number <= len(mine) else []
+                        ret = next((x for x in reversed(legs) if x.get("leg") == "return"), None)
+                        if ret is not None:
+                            chains.insert(0, ("ret_", next(i for i, x in enumerate(mine, 1) if x is ret)))
+                    for base, after in chains:
+                        for p in conns(base):
+                            added = on_connect(topic, f"{after} {trip_text(data, prefix=p)}")
+                            if added.startswith(("❌", "🤔", "🤷")):
+                                return 400, {"ok": False, "message": f"{added}\n(The flights before it were added.)" if msg else added}
+                            msg = f"{msg}\n{added}".strip()
+                            mine = trips.for_topic(topic)
+                            nxt = trips.connects_to(mine[after - 1], mine)
+                            after = next(i for i, x in enumerate(mine, 1) if x is nxt) if nxt else after
                     edits_text = trip_text(data, number)
                     if edits_text != str(number):
                         changed = trips.modify(topic, edits_text, on_change, now, cfg["time_zone"])

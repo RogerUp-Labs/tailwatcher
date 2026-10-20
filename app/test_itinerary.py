@@ -194,12 +194,19 @@ class PartsTest(unittest.TestCase):
         self.assertEqual(sorted(got), ["2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06",
                                        "2026-11-07", "2026-11-13", "2027-01-02"])
 
-    def test_more_flights_than_the_form_holds(self):
+    def test_every_connection_fills_the_form(self):
         legs = [{"flight": f"UA{n}", "date": "2026-11-03", "time": f"0{n}:00", "dep": None, "arr": None}
                 for n in range(1, 4)]
         form, notes = itinerary.to_form(itinerary.journeys(legs))
-        self.assertEqual(form["conn_flight"], "UA2")
-        self.assertTrue(any("UA3" in n for n in notes))
+        self.assertEqual((form["conn_flight"], form["conn2_flight"]), ("UA2", "UA3"))
+        self.assertFalse(any("UA3" in n for n in notes))
+
+    def test_more_flights_than_can_be_followed(self):
+        legs = [{"flight": f"UA{n}", "date": "2026-11-03", "time": f"{n:02}:00", "dep": None, "arr": None}
+                for n in range(1, trips.MAX_LEGS + 2)]
+        form, notes = itinerary.to_form(itinerary.journeys(legs))
+        self.assertEqual(form[trips.form_prefix("", trips.MAX_LEGS - 2) + "flight"], f"UA{trips.MAX_LEGS}")
+        self.assertTrue(any(f"UA{trips.MAX_LEGS + 1}" in n for n in notes))
 
     def test_a_later_flight_from_somewhere_else_is_a_separate_journey(self):
         legs = [{"flight": "UA1", "date": "2026-11-03", "time": "08:00", "dep": "EWR", "arr": "DEN"},

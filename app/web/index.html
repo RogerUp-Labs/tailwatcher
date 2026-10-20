@@ -142,6 +142,21 @@ section h2 .count { background: var(--surface); border: 1px solid var(--border);
 .journey .trip + .trip { border-top: 1px dashed var(--border); }
 .form-sub { margin: 6px 0 -2px; padding-top: 10px; border-top: 1px solid var(--border); font-weight: 600; }
 .form-sub small { display: block; font-weight: 400; color: var(--text-3); white-space: pre-line; }
+.form-group { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 6px; }
+.form-group > summary { cursor: pointer; font-weight: 600; list-style: none; display: grid; grid-template-columns: auto 1fr; column-gap: 8px; }
+.form-group > summary::-webkit-details-marker { display: none; }
+.form-group > summary::before { content: "▸"; color: var(--brand); transition: transform .15s; }
+.form-group[open] > summary::before { transform: rotate(90deg); }
+.form-group > summary small { grid-column: 2; font-weight: 400; color: var(--text-3); font-size: 12.5px; }
+.form-group > .group-body { display: grid; gap: 12px; margin-top: 12px; }
+.legs, .leg { display: grid; gap: 12px; }
+.legs [data-list]:empty { display: none; }
+.legs [data-list]:not(:empty) ~ small { display: none; }
+.leg-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.leg-head .linkbtn { font-size: 13px; font-weight: 400; }
+.add-leg { justify-self: start; font-weight: 600; font-size: 14px; }
+.legs > small { color: var(--text-3); font-size: 12px; margin-top: -8px; }
+@media (prefers-reduced-motion: reduce) { .form-group > summary::before { transition: none; } }
 .t-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .t-flight { font-family: var(--mono); font-weight: 800; font-size: 20px; letter-spacing: .3px; }
 .t-when { color: var(--text-2); }
@@ -837,17 +852,70 @@ const field = (f) => {
   const id = "f-" + f.name, v = f.value ?? "";
   if (f.type === "checks") return f.options.length ? `<div class="checks" role="group" aria-label="${esc(f.label)}">${esc(f.label)}<div class="opts">${f.options.map(([val, lab]) =>
     `<label><input type="checkbox" name="${f.name}" value="${esc(val)}" ${(v || []).includes(val) ? "checked" : ""}> ${esc(lab)}</label>`).join("")}</div>${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</div>` : "";
+  if (f.type === "group") return `<details class="form-group"${f.open ? " open" : ""}><summary>${esc(f.label)}${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</summary><div class="group-body">${fieldsHtml(f.fields)}</div></details>`;
+  if (f.type === "legs") return `<div class="legs" id="legs-${f.base || "out"}"><div class="legs" data-list>${legBlocks(f, f.value || [])}</div>`
+    + `<button type="button" class="linkbtn add-leg">${esc(f.add)}</button>${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</div>`;
   if (f.type === "heading") return `<div class="form-sub">${esc(f.label)}${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</div>`;
   if (f.type === "check") return `<label class="field check"><input type="checkbox" id="${id}" name="${f.name}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
   if (f.type === "select") return `<label class="field" for="${id}">${esc(f.label)}<select id="${id}" name="${f.name}">${f.options.map(([val, lab]) => `<option value="${esc(val)}" ${String(val) === String(v) ? "selected" : ""}>${esc(lab)}</option>`).join("")}</select>${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`;
   return `<label class="field" for="${id}">${esc(f.label)}<input id="${id}" name="${f.name}" type="${f.type || "text"}" value="${esc(v)}" ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ""} ${f.required ? "required" : ""} ${f.attrs || ""} autocomplete="off" autocapitalize="${f.caps === false ? "off" : "characters"}" spellcheck="false">${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`;
 };
 
+const fieldsHtml = (fields) => fields.map((f) => Array.isArray(f) ? `<div class="two">${f.map(field).join("")}</div>` : field(f)).join("");
+/** Every field spec, with groups' fields and pairs flattened. */
+const allFields = (fields) => fields.flat().flatMap((f) => f.type === "group" ? allFields(f.fields) : [f]);
+
+/** Connecting flights the person adds one at a time ("+ Add connection").
+ * spec: {type: "legs", base: "" | "ret_", label, add, hint, adb, value: [{flight, time, plane}]};
+ * field names are trips.form_prefix(): conn_, conn2_, … (ret_conn_, ret_conn2_, … after the return). */
+const MAX_CONNECTIONS = 7;  // trips.MAX_LEGS - 1
+const legPrefix = (base, n) => `${base}conn${n ? n + 1 : ""}_`;
+function legBlocks(spec, values) {
+  return values.map((v, n) => {
+    const p = legPrefix(spec.base, n), title = `${spec.label} ${n + 1}`;
+    return `<div class="leg" data-leg>
+      <div class="form-sub leg-head"><span>${esc(title)}</span><button type="button" class="linkbtn" data-remove-leg="${n}" aria-label="Remove ${esc(title.toLowerCase())}">Remove</button></div>
+      ${fieldsHtml([
+        [{name: p + "flight", label: "Flight", value: v.flight, placeholder: "UA567"},
+         {name: p + "time", label: "Departs", type: "time", value: v.time, hint: spec.adb ? "Optional with AeroDataBox" : "Local time where it leaves"}],
+        {name: p + "plane", label: "Plane flying in", value: v.plane, placeholder: "N12345 or UA890",
+         hint: spec.adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the connection)."}])}
+    </div>`;
+  }).join("");
+}
+function wireLegs(form, spec) {
+  const box = form.querySelector("#legs-" + (spec.base || "out"));
+  if (!box) return;
+  const list = box.querySelector("[data-list]"), add = box.querySelector(".add-leg");
+  const read = () => [...list.querySelectorAll("[data-leg]")].map((el, n) => {
+    const get = (k) => (el.querySelector(`[name="${legPrefix(spec.base, n)}${k}"]`) || {}).value || "";
+    return {flight: get("flight"), time: get("time"), plane: get("plane")};
+  });
+  const draw = (values, focus) => {
+    list.innerHTML = legBlocks(spec, values);
+    add.hidden = values.length >= MAX_CONNECTIONS;
+    if (focus != null) {
+      const el = list.querySelectorAll("[data-leg]")[focus];
+      (el ? el.querySelector("input") : add.hidden ? null : add)?.focus();
+    }
+  };
+  add.onclick = () => { const v = read(); draw([...v, {}], v.length); };
+  list.onclick = (e) => {
+    const btn = e.target.closest("[data-remove-leg]");
+    if (!btn) return;
+    const v = read(), n = Number(btn.dataset.removeLeg);
+    v.splice(n, 1);
+    draw(v, v.length ? Math.min(n, v.length - 1) : null);
+    if (!v.length) add.focus();
+  };
+  add.hidden = (spec.value || []).length >= MAX_CONNECTIONS;
+}
+
 /** Open the shared form. spec: {title, fields (or [a, b] pairs), save(values), remove?/remove2?: {label, confirm, run()}} */
 function openForm(spec) {
   const form = $("dlg-form");
   form.innerHTML = `<h3 id="dlg-title">${esc(spec.title)}</h3>
-    ${spec.fields.map((f) => Array.isArray(f) ? `<div class="two">${f.map(field).join("")}</div>` : field(f)).join("")}
+    ${fieldsHtml(spec.fields)}
     <div class="form-error" id="dlg-err" role="alert"></div>
     <div class="dlg-actions">
       ${spec.remove ? `<button type="button" class="btn danger" id="dlg-remove">${esc(spec.remove.label)}</button>` : ""}
@@ -855,6 +923,7 @@ function openForm(spec) {
       <button type="button" class="btn" id="dlg-cancel">Close</button>
       <button type="submit" class="btn primary">${esc(spec.saveLabel || "Save")}</button>
     </div>`;
+  for (const f of allFields(spec.fields)) if (f.type === "legs") wireLegs(form, f);
   const dlg = $("dlg");
   const done = async (result) => {
     if (result.ok) { dlg.close(); toast(result.message); load(); }
@@ -893,12 +962,18 @@ function tripForm(t, pre, intro) {
   const others = t ? othersOf(t) : [];
   const canAddReturn = !t || !hasReturn(t);
   const canConnect = !t || !t.connect_to;
-  const connFields = (prefix, label, hint) => [
-    {type: "heading", label, hint},
-    [{name: prefix + "flight", label: "Connecting flight", placeholder: "UA567"},
-     {name: prefix + "time", label: "Departs", type: "time", hint: adb ? "Optional with AeroDataBox" : "Local time where it leaves"}],
-    {name: prefix + "plane", label: "Plane flying in", placeholder: "N12345 or UA890", hint: adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the connection)."},
-  ];
+  /** Connections already filled in (by Import) for base "" or "ret_". */
+  const preLegs = (base) => {
+    const out = [];
+    for (let n = 0; pre && pre[legPrefix(base, n) + "flight"]; n++) {
+      const p = legPrefix(base, n);
+      out.push({flight: pre[p + "flight"], time: pre[p + "time"] || "", plane: pre[p + "plane"] || ""});
+    }
+    return out;
+  };
+  const legs = (base, label) => ({type: "legs", base, label, adb, value: preLegs(base),
+    add: base ? "+ Add return connection" : "+ Add connection",
+    hint: base ? "Changing planes on the way home? Add each flight after the return." : "Changing planes? Add each connecting flight. I'll tell you how long you'll have to make it."});
   const fields = [
     ...(intro ? [intro] : []),
     ...(t ? [] : [{name: "topic", label: "For", type: "select", options: watcherOptions()}]),
@@ -909,22 +984,21 @@ function tripForm(t, pre, intro) {
     {name: "to", label: "Getting off at", value: t ? apt(t.get_off) : "", placeholder: "DEN", hint: "Optional: only for a flight that stops on the way and you get off early"},
     {name: "plane", label: "Plane flying in", value: inb.tail || inb.flight || "", placeholder: "N38473 or UA567",
      hint: adb ? "Leave blank and AeroDataBox finds it. See ? Help → Trips." : "From your airline app's \"Where's my plane?\" screen. See ? Help → Trips."},
-    ...(canConnect ? connFields("conn_", "Connecting flight", "Optional: the next flight after this one. I'll tell you how long you'll have to make it.") : []),
-    ...(canAddReturn ? [
-      {type: "heading", label: "Return flight", hint: "Optional: your flight home, tracked as part of the same trip."},
+    ...(canConnect ? [legs("", "Connection")] : []),
+    ...(canAddReturn ? [{type: "group", label: "Return flight", hint: "Optional: your flight home, tracked as part of the same trip.", open: !!(pre && pre.ret_flight), fields: [
       [{name: "ret_flight", label: "Return flight", placeholder: "UA5678"},
        {name: "ret_date", label: "Date", type: "date"}],
       [{name: "ret_time", label: "Departs", type: "time", hint: adb ? "Optional with AeroDataBox" : "Local time where it leaves"},
        {name: "ret_airport", label: "From airport", placeholder: "LAS", hint: "Blank: where you land"}],
       {name: "ret_plane", label: "Plane flying in", placeholder: "N12345 or UA567", hint: adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the return)."},
-      ...(t ? [] : connFields("ret_conn_", "Return connection", "Optional: the next flight after the return.")),
-    ] : []),
+      legs("ret_", "Return connection"),
+    ]}] : []),
     {name: "share", label: "Share with", type: "checks", value: t ? t.shared_with : [],
      options: LAST.watchers.filter((w) => !t || w.topic !== t.topic).map((w) => [w.topic, w.name]),
      hint: others.length ? `Covers every flight of this trip (${[t, ...others].map((x) => x.flight).join(", ")}). They get each flight's departure and landing, nothing else.`
        : "They get your flight's departure and landing, nothing else."},
   ];
-  if (pre) for (const f of fields.flat()) if (f.name && f.name in pre) f.value = pre[f.name];
+  if (pre) for (const f of allFields(fields)) if (f.name && f.name in pre) f.value = pre[f.name];
   if (!t) return openForm({title: pre ? "Check your imported trip" : "Add trip", fields, saveLabel: "Add trip",
     save: (v) => api("api/trip", {op: "add", ...v, share: (v.share || []).filter((x) => x !== v.topic)})});
   const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", airport: apt(t.dep_airport), to: apt(t.get_off), plane: inb.tail || inb.flight || ""};
