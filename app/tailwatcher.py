@@ -7,10 +7,14 @@ watcher's ntfy topic on departure (and optionally on landing). Each tail is
 polled once however many watchers follow it. Standard library only.
 
 Config:  $TW_CONFIG (default /data/config.json), written by the StartOS
-         Configure action.
+         Configure action or the Web UI's Settings.
 State:   $TW_STATE (default /data/state.json), so restarts don't re-alert.
-Env:     NTFY_URL        this Start9's NTFY on the internal network (e.g. http://10.0.3.5:80)
+Env:     NTFY_URL        this server's NTFY as TailWatcher reaches it (e.g. http://10.0.3.5:80,
+                         or http://ntfy:80 in docker-compose)
          NTFY_PHONE_URL  the address phones use for that NTFY (for "Connect phone" links)
+         TAILWATCHER_PUBLIC_URL  TailWatcher's own https address, for invite links
+         TW_PLATFORM     "startos" or "docker"; TAILWATCHER_PASSWORD (Docker) sets
+                         the dashboard password
 Which server is used comes from config.json "ntfyServer": public (ntfy.sh,
 the default), local (NTFY_URL) or custom ("ntfyCustomUrl").
 """
@@ -43,7 +47,10 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.18.0"
+VERSION = "0.19.0"
+# "startos" (main.ts sets it) or "docker" (the Dockerfile's default): only
+# changes setup hints and whether the dashboard password starts on.
+PLATFORM = os.environ.get("TW_PLATFORM", "startos")
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/RogerUp-Labs/tailwatcher)"
 
 DATA_SOURCES = {
@@ -134,9 +141,10 @@ def load_config(path=CONFIG_PATH, now=None):
         "ntfy_server": raw.get("ntfyServer") or ("local" if raw.get("ntfyToken") else "public"),
         "ntfy_custom_url": (raw.get("ntfyCustomUrl") or "").strip(),
         "ntfy_phone_mode": raw.get("ntfyPhoneMode") or "open",
-        "web_password": raw.get("webPassword") is True,
         "adb_key": (raw.get("aerodataboxKey") or "").strip(),
-        "web_password": bool(raw.get("webPassword", False)),
+        # Off by default on StartOS (LAN/VPN only); on for a plain Docker install,
+        # whose port may be forwarded anywhere.
+        "web_password": bool(raw.get("webPassword", PLATFORM != "startos")),
     }
 
 
@@ -445,11 +453,12 @@ def poll_all(source, wanted, fetch=fetch_many):
 def web_password_required(path=CONFIG_PATH):
     """Read straight from config.json on each request, so turning the password
     on in Configure applies at once rather than at the next poll cycle."""
+    default = PLATFORM != "startos"
     try:
         with open(path) as f:
-            return json.load(f).get("webPassword") is True
+            return json.load(f).get("webPassword", default) is True
     except (OSError, ValueError, AttributeError):
-        return False
+        return default
 
 
 def config_mtime():
@@ -504,6 +513,11 @@ def run():
         format="%(asctime)s %(levelname)s %(message)s",
         stream=sys.stdout,
     )
+    if PLATFORM != "startos":  # StartOS init writes it and shows it in Actions
+        password = web.ensure_password(wanted=os.environ.get("TAILWATCHER_PASSWORD"))
+        if web_password_required():
+            log.info("Web UI password: %s (any username; change it with TAILWATCHER_PASSWORD, "
+                     "or run: docker exec tailwatcher python /app/tailwatcher.py reset-password)", password)
     health = Health()
     hist = history.History()
     ntfy_url, ntfy_token, phone_url = resolve_ntfy(load_config())
@@ -548,7 +562,7 @@ def run():
         if trip["inbound"]:
             return None, None
         if not cfg["adb_key"]:
-            return (trips.USAGE + "\n\nOr add a free AeroDataBox key in Configure and I'll look "
+            return (trips.USAGE + "\n\nOr add a free AeroDataBox key in ⚙ Settings and I'll look "
                     "the plane up myself."), None
         try:
             adb_refresh(trip, now)
@@ -999,6 +1013,7 @@ def run():
                          "time_zone": cur["time_zone"], "web_password": cur["web_password"],
                          "time_zones": [[k, v] for k, v in edits.TIME_ZONES.items()],
                          "public_url": os.environ.get("TAILWATCHER_PUBLIC_URL", "").strip(),
+                         "platform": PLATFORM,
                          "listening": sorted(names[k] for k in names if k not in listen_errors)},
             "watchers": watchers_out, "trips": trips_out,
             "invites": [{k: i.get(k) for k in ("token", "topic", "from", "expires", "kind")}
@@ -1226,7 +1241,7 @@ def run():
             problems = [] if cfg["watchers"] else ["no watchers"]
             if not ntfy_url:
                 problems.append("NTFY not reachable")
-            health.set(False, "Not configured: " + ", ".join(problems) + ". Run the Configure action.")
+            health.set(False, "Not configured: " + ", ".join(problems) + ". Set it up in the Web UI.")
             wake.wait(10)
             wake.clear()
             continue
@@ -1291,7 +1306,7 @@ def run():
         elif backoff:
             health.set(True, f"Rate limited by {cfg['data_source']}, retrying in {backoff}s{flying}", airborne=airborne)
         elif not subs:
-            health.set(True, "No aircraft yet. Text a tail or flight number to a watcher's topic, or use Configure.")
+            health.set(True, "No aircraft yet. Text a tail or flight number to a watcher's topic, or add one in the Web UI.")
         else:
             n_w = len(cfg["watchers"])
             health.set(True, f"Watching {len(subs)} aircraft for {n_w} watcher{'s' if n_w != 1 else ''}{flying}",
@@ -1303,5 +1318,51 @@ def run():
             wake.wait(wait)
         wake.clear()
 
+def send_test(cfg):
+    """A sample takeoff alert to every watcher's topic, like StartOS's
+    "Send Test Notification" action. Returns [(watcher name, topic, result)]."""
+    url, token, _ = resolve_ntfy(cfg)
+    if not url:
+        return [("", "", "no notification server: set NTFY_URL, or pick another server in Settings")]
+    link = "https://globe.adsbexchange.com/?icao=a835af"
+    out = []
+    for w in cfg["watchers"]:
+        try:
+            publish(url, token, {
+                "topic": w["topic"], "title": f"TailWatcher test for {w['name']}: N628TS departed",
+                "message": "at KFDK – Frederick Municipal Airport\n1,800 ft · 105 kt · hdg 270°\nThis is a test alert.",
+                "tags": ["airplane", "test_tube"], "click": link,
+                "actions": [{"action": "view", "label": "ADS-B Exchange", "url": link}]})
+            out.append((w["name"], w["topic"], "✓ sent"))
+        except urllib.error.HTTPError as e:
+            hint = (": the token has no access to this topic" if e.code in (401, 403) else "")
+            out.append((w["name"], w["topic"], f"✗ refused (HTTP {e.code}){hint}"))
+        except (urllib.error.URLError, OSError) as e:
+            out.append((w["name"], w["topic"], f"✗ could not reach {url}: {e}"))
+    return out
+
+
+def cli(args):
+    """`python /app/tailwatcher.py password|reset-password|test`, for installs
+    without StartOS's Actions menu (docker exec tailwatcher ...)."""
+    if args == ["password"]:
+        print(web.read_password() or "No password yet: start TailWatcher once to make one.")
+    elif args == ["reset-password"]:
+        print(web.new_password(), "(the old password stopped working; any username)")
+    elif args == ["test"]:
+        cfg = load_config()
+        if not cfg["watchers"]:
+            print("Add a watcher in the Web UI first.")
+            return 1
+        results = send_test(cfg)
+        for name, topic, result in results:
+            print(f"{name} → {topic}: {result}")
+        return 1 if any(not r.startswith("✓") for _, _, r in results) else 0
+    else:
+        print("Usage: tailwatcher.py [password | reset-password | test]")
+        return 2
+    return 0
+
+
 if __name__ == "__main__":
-    run()
+    sys.exit(cli(sys.argv[1:]) if len(sys.argv) > 1 else run())

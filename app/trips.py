@@ -779,7 +779,7 @@ def adb_get(key, path, params, ua, timeout=20):
             return json.loads(body) if r.status != 204 and body.strip() else []
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
-            raise AdbError("AeroDataBox rejected the API key (check it in Configure)") from e
+            raise AdbError("AeroDataBox rejected the API key (check it in Settings)") from e
         if e.code == 429:
             raise AdbError("AeroDataBox quota or rate limit reached") from e
         raise AdbError(f"AeroDataBox error HTTP {e.code}") from e

@@ -1,10 +1,14 @@
-# Builds the TailWatcher .s9pk for x86_64 and aarch64.
+# Builds the TailWatcher .s9pk for x86_64 and aarch64, and the plain Docker
+# image (docker/docker-compose.yml) for running without a Start9.
 #
-# - Pull requests: test + build both packages (kept as workflow artifacts).
+# - Pull requests: test + build both packages (kept as workflow artifacts),
+#   and build the Docker image and check it starts and answers /health.
 # - Pushing a tag like v0.18.0: the same, then a GitHub release with both
-#   packages attached. Merging to main never publishes anything: versions
-#   keep bumping per feature for local testing, and only a tag releases. The
-#   release notes cover every version since the previous tag.
+#   packages attached, and the Docker image (amd64 + arm64) pushed to
+#   ghcr.io/rogerup-labs/tailwatcher as :X.Y.Z and :latest. Merging to main
+#   never publishes anything: versions keep bumping per feature for local
+#   testing, and only a tag releases. The release notes cover every version
+#   since the previous tag.
 #
 # Signing: set the repository secret DEV_KEY to the contents of
 # ~/.startos/developer.key.pem so released packages carry the same signature
@@ -125,9 +129,75 @@ jobs:
           compression-level: 0
           retention-days: 14
 
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/rogerup-labs/tailwatcher
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build for the smoke test
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: tailwatcher:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A fresh container with an empty /data, as a NAS user would start it:
+      # it must make a dashboard password, keep /health open, and lock the rest.
+      - name: Smoke test
+        run: |
+          docker run -d --name tw -p 8080:8080 tailwatcher:ci
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8080/health && break
+            sleep 1
+          done
+          echo
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)" = 401
+          PW=$(docker exec tw python /app/tailwatcher.py password)
+          curl -fsS -u "x:$PW" http://localhost:8080/api/state | python3 -c \
+            "import json,sys; d=json.load(sys.stdin); assert d['settings']['platform'] == 'docker', d['settings']; print('version', d['version'])"
+          docker logs tw 2>&1 | grep -q "Web UI password"
+          docker rm -f tw
+
+      - name: Log in to GitHub Container Registry
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-qemu-action@v4
+        if: startsWith(github.ref, 'refs/tags/')
+
+      - name: Image version (v0.19.0 → 0.19.0)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Push ${{ env.IMAGE }}
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [build, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -156,6 +226,8 @@ jobs:
             echo "## Install"
             echo
             echo "Download the x86_64 file for most servers (aarch64 for ARM ones) and sideload it in StartOS."
+            echo
+            echo "Without a Start9 (Synology, Unraid, TrueNAS or any Docker host): use [docker-compose.yml](https://github.com/RogerUp-Labs/tailwatcher/blob/${GITHUB_REF_NAME}/docker/docker-compose.yml) with the image \`ghcr.io/rogerup-labs/tailwatcher:${GITHUB_REF_NAME#v}\` (or \`:latest\`)."
             echo
             echo "## SHA256"
             echo '```'

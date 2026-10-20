@@ -90,6 +90,9 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 | D5 | Board theme flips tiles on a live change | | |
 | D6 | System panel shows a real ntfy / feed / AeroDataBox problem | | |
 | D7 | Survives a StartOS restart and a package update with config, trips and history intact | | |
+| D8 | Synology: Container Manager project from docker/docker-compose.yml starts, password is in the log, dashboard opens at :8080 | | 0.19.0, needs the v0.19.0 tag (or a locally built image) |
+| D9 | Synology: alerts through an ntfy on the NAS (NTFY_URL, "This server's NTFY"), Connect phone link with NTFY_PHONE_URL, text commands answered | | 0.19.0 |
+| D10 | Synology: updating to a newer image keeps watchers, trips and history (the `data` folder) | | 0.19.0. Note which Container Manager steps actually pull the new image |
 
 ## 7. Reliability (over weeks)
 

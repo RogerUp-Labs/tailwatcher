@@ -1,0 +1,52 @@
+# TailWatcher without a Start9: Synology (Container Manager → Project),
+# Unraid, TrueNAS SCALE (Custom App) or any machine with Docker Compose.
+#
+#   docker compose up -d
+#   docker compose logs tailwatcher    # the Web UI password is printed here
+#
+# Then open http://<this machine>:8080 and add your first watcher.
+# Out of the box, alerts go through the free public ntfy.sh, so nothing else
+# is needed. To keep alerts on your own ntfy, see NTFY_URL below.
+
+services:
+  tailwatcher:
+    image: ghcr.io/rogerup-labs/tailwatcher:latest
+    container_name: tailwatcher
+    restart: unless-stopped
+    ports:
+      - "8080:8080"            # change the left side if 8080 is taken on this machine
+    volumes:
+      - ./data:/data           # settings, watchers, trips and history live here: back this folder up
+    environment:
+      # Your own ntfy server, as TailWatcher reaches it, e.g. http://192.168.1.20:8090
+      # or http://ntfy:80 for the ntfy service below. Then pick "This server's NTFY"
+      # in TailWatcher's ⚙ Settings. Leave empty to use ntfy.sh or "Another ntfy server".
+      NTFY_URL: ""
+      # The address phones use for that ntfy (https, reachable from where the phone is),
+      # for one-tap "Connect phone" links, e.g. https://ntfy.example.com
+      NTFY_PHONE_URL: ""
+      # TailWatcher's own https address, if you put it behind a reverse proxy.
+      # Invite links need it; without it they only work at home.
+      TAILWATCHER_PUBLIC_URL: ""
+      # Pick your own dashboard password instead of the generated one (optional).
+      TAILWATCHER_PASSWORD: ""
+
+  # Optional: run ntfy alongside TailWatcher. Uncomment, set NTFY_URL above to
+  # http://ntfy:80, and point NTFY_BASE_URL / NTFY_PHONE_URL at the address your
+  # phones use. iPhones only get instant alerts from ntfy.sh or a server with
+  # upstream-base-url set (see docs.ntfy.sh/config/#ios-instant-notifications).
+  #
+  # ntfy:
+  #   image: binwiederhier/ntfy:latest
+  #   container_name: ntfy
+  #   command: serve
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8090:80"
+  #   volumes:
+  #     - ./ntfy/cache:/var/cache/ntfy
+  #     - ./ntfy/etc:/etc/ntfy
+  #   environment:
+  #     NTFY_BASE_URL: "https://ntfy.example.com"
+  #     NTFY_CACHE_FILE: /var/cache/ntfy/cache.db
+  #     NTFY_UPSTREAM_BASE_URL: "https://ntfy.sh"

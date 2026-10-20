@@ -44,7 +44,7 @@ HELP = (
     "• list — what you're watching\n"
     "• info N12345 — who owns it, what it is, where it is now\n"
     "• inbound UA1234 N38473 dep 4:30pm — follow the plane flying in for your flight\n"
-    "  (with an AeroDataBox key in Configure, just: inbound UA1234)\n"
+    "  (with an AeroDataBox key in Settings, just: inbound UA1234)\n"
     "• inbound UA1234 11/14 return UA5678 11/21 — both flights of a round trip at once\n"
     "• inbound UA1234 then UA567 — a connecting flight; I'll tell you how long you'll have to make it\n"
     "• return 1 UA5678 11/21 — add the flight home to trip 1\n"

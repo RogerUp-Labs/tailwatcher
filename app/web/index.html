@@ -478,7 +478,7 @@ function renderStats(d) {
 function renderWatchers(d) {
   $("c-watch").textContent = d.watchers.length;
   if (!d.watchers.length) {
-    $("watchers").innerHTML = `<div class="card empty">No watchers yet. Add one in TailWatcher → Actions → Configure.</div>`;
+    $("watchers").innerHTML = `<div class="card empty">No watchers yet. Tap + Add watcher to add the first person.</div>`;
     return;
   }
   const sorted = (list) => [...list].sort((a, b) => (b.status === "airborne") - (a.status === "airborne"));
@@ -650,6 +650,8 @@ function renderSystem(d) {
 
 /* ---------- board theme ---------- */
 let THEME = "modern", LAST = null;
+// Plain Docker install (no StartOS Actions or Marketplace): setup hints name env vars instead.
+const docker = () => !!(LAST && LAST.settings && LAST.settings.platform === "docker");
 const PREV = {};  // board cell key -> text shown last refresh, to flip only what changed
 try { THEME = localStorage.getItem("tw-theme") || "modern"; } catch (e) { /* storage blocked: use default */ }
 
@@ -728,7 +730,7 @@ function fleetStatus(a) {
 function renderWatchersBoard(d) {
   $("c-watch").textContent = d.watchers.length;
   if (!d.watchers.length) {
-    $("watchers").innerHTML = `<div class="card empty">No watchers yet. Add one in TailWatcher → Actions → Configure.</div>`;
+    $("watchers").innerHTML = `<div class="card empty">No watchers yet. Tap + Add watcher to add the first person.</div>`;
     return;
   }
   const groups = d.watchers.map((w) => {
@@ -1008,7 +1010,7 @@ function connectPhone(w) {
     <div class="invite-box">
       <h4>Send an invite link</h4>
       <div class="note">Best for texts, iMessage or Signal: a normal web link that walks them through installing ntfy and subscribing. Works from anywhere.</div>
-      ${publicUrl ? "" : `<div class="warn-text">TailWatcher has no public address, so invite links only work on your home network. To send one farther, give TailWatcher's Web UI a public address in StartOS (for example with StartTunnel).</div>`}
+      ${publicUrl ? "" : `<div class="warn-text">TailWatcher has no public address, so invite links only work on your home network. To send one farther, ${docker() ? "put TailWatcher behind an https address (a reverse proxy) and set TAILWATCHER_PUBLIC_URL to it" : "give TailWatcher's Web UI a public address in StartOS (for example with StartTunnel)"}.</div>`}
       <div class="invite-row">
         <input id="inv-from" placeholder="Your name (shown on the invite)" value="${esc(sender)}" maxlength="40" autocomplete="off">
         <select id="inv-days" aria-label="Link works for">${[[1, "1 day"], [3, "3 days"], [7, "7 days"], [14, "14 days"], [30, "30 days"]].map(([d, l]) => `<option value="${d}" ${d === 7 ? "selected" : ""}>${l}</option>`).join("")}</select>
@@ -1032,12 +1034,12 @@ function connectPhone(w) {
         </div>
         <div class="note">No app link support? Open <a href="${esc(info.web)}" target="_blank" rel="noopener noreferrer">${esc(info.web)}</a>, or in the app tap + and enter server <b>${esc(info.host)}</b> and topic <b>${esc(w.topic)}</b>.</div></li>`
       : `<li>In the ntfy app, tap +, turn on "Use another server", enter your NTFY's address, and subscribe to <b>${esc(w.topic)}</b>.
-        <div class="note">TailWatcher can't see an address phones can use for your NTFY. Give NTFY a public or LAN address in StartOS, and this becomes a one-tap link.</div></li>`}
+        <div class="note">TailWatcher can't see an address phones can use for your NTFY. ${docker() ? "Set NTFY_PHONE_URL to the https address phones use for it" : "Give NTFY a public or LAN address in StartOS"}, and this becomes a one-tap link.</div></li>`}
       ${local && LAST.settings.ntfy_phone_mode === "login" ? `<li>Their ntfy app needs an NTFY login for your server.
         <div class="row-btns"><input id="cp-admin" type="password" autocomplete="off" placeholder="NTFY admin password" style="flex:1;min-width:160px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)">
         <button type="button" class="btn" id="cp-login">Create NTFY login</button></div>
         <div class="note">Admin password used once, not saved.</div><div id="cp-login-out"></div></li>`
-      : local && !LAST.settings.ntfy_token_set ? `<li class="note">This server's NTFY isn't set up yet: open ⚙ Settings and use "Set up NTFY for me".</li>` : ""}
+      : local && !docker() && !LAST.settings.ntfy_token_set ? `<li class="note">This server's NTFY isn't set up yet: open ⚙ Settings and use "Set up NTFY for me".</li>` : ""}
       ${LAST.settings.text_commands ? `<li>They can also type in that topic to manage their list. "help" shows the commands.</li>` : ""}
     </ol></div>
     <div class="dlg-actions"><button type="button" class="linkbtn help-link" data-act="help" data-section="connecting-a-phone" style="margin-right:auto">? Help with connecting</button><button type="button" class="btn" id="dlg-cancel">Done</button></div>`;
@@ -1169,7 +1171,7 @@ async function openHelp(target) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       GUIDE = parseGuide(await r.text());
     } catch (err) {
-      $("guide").textContent = "Couldn't load the guide (" + err.message + "). It's also under Instructions in StartOS.";
+      $("guide").textContent = "Couldn't load the guide (" + err.message + ")." + (docker() ? "" : " It's also under Instructions in StartOS.");
       return;
     }
   }
@@ -1241,10 +1243,10 @@ function openSettings() {
   form.innerHTML = `<h3 id="dlg-title">Settings</h3>
     <div class="set-section"><h4>Notifications <button type="button" class="linkbtn help-link" data-act="help" data-section="settings-and-where-alerts-go">? Help</button></h4>
       ${radio("ntfyServer", "public", s.ntfy_server, "ntfy.sh <small>(easiest)</small>", "The free public ntfy service. Nothing to install; each person's topic is a long random name, which keeps their alerts private.")}
-      ${radio("ntfyServer", "local", s.ntfy_server, "This server's NTFY <small>(private)</small>", "Alerts stay on your hardware. Needs the NTFY package; TailWatcher sets it up for you below.")}
+      ${radio("ntfyServer", "local", s.ntfy_server, "This server's NTFY <small>(private)</small>", docker() ? "Alerts stay on your hardware: the NTFY at NTFY_URL. TailWatcher sets it up for you below." : "Alerts stay on your hardware. Needs the NTFY package; TailWatcher sets it up for you below.")}
       ${radio("ntfyServer", "custom", s.ntfy_server, "Another ntfy server", "Any ntfy server you run elsewhere.")}
       <div class="sub-panel" id="p-local" ${s.ntfy_server === "local" ? "" : "hidden"}>
-        ${s.local_ntfy ? `<div class="status-line">${s.ntfy_server === "local" && s.ntfy_token_set ? "✓ Set up. Run it again any time to change how phones connect." : "Not set up yet."}</div>` : `<div class="form-error">NTFY isn't installed (or isn't running). Install it from the StartOS Marketplace, then come back here.</div>`}
+        ${s.local_ntfy ? `<div class="status-line">${s.ntfy_server === "local" && s.ntfy_token_set ? "✓ Set up. Run it again any time to change how phones connect." : "Not set up yet."}</div>` : `<div class="form-error">${docker() ? "TailWatcher doesn't know where your NTFY is. Set NTFY_URL (for example http://ntfy:80) in docker-compose.yml and restart TailWatcher." : "NTFY isn't installed (or isn't running). Install it from the StartOS Marketplace, then come back here."}</div>`}
         ${radio("phones", "open", s.ntfy_phone_mode, "Phones connect without a login <small>(recommended)</small>", "Anyone with a Connect phone link subscribes in one tap. Other topics on your NTFY stay locked.")}
         ${radio("phones", "login", s.ntfy_phone_mode, "One NTFY login per person", "More private. TailWatcher makes each person an NTFY account; you enter it once in their ntfy app.")}
         <label class="field" for="s-admin">NTFY admin password
@@ -1277,7 +1279,7 @@ function openSettings() {
       </div>
       <label class="field check"><input type="checkbox" name="textCommands" ${s.text_commands ? "checked" : ""}> Text commands (people manage their list by typing in their topic)</label>
       <label class="field check"><input type="checkbox" name="webPassword" ${s.web_password ? "checked" : ""}> Require a password for this page</label>
-      <div class="note" id="s-pw-note" ${s.web_password ? "hidden" : ""}>If you turn this on, get the password first from StartOS → TailWatcher → Actions → Show Web UI Password.</div>
+      <div class="note" id="s-pw-note" ${s.web_password ? "hidden" : ""}>If you turn this on, get the password first from ${docker() ? "TailWatcher's container log, or run docker exec tailwatcher python /app/tailwatcher.py password" : "StartOS → TailWatcher → Actions → Show Web UI Password"}.</div>
     </div>
     <div class="form-error" id="dlg-err" role="alert"></div>
     <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Close</button><button type="submit" class="btn primary">Save settings</button></div>`;
