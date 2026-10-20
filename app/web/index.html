@@ -436,14 +436,16 @@ const num = (n) => Number(n).toLocaleString();
 const initials = (name) => (name || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 const HUES = ["#1f5fa8", "#7a4cc2", "#1e8a6a", "#c2562b", "#a8326e", "#3a6f2a"];
 const hue = (i) => HUES[i % HUES.length];  // by watcher order, so neighbours never match
-const mapLink = (hex) => hex ? `https://globe.adsbexchange.com/?icao=${encodeURIComponent(hex)}` : null;
+// Only while the plane is transmitting: a parked plane's map shows nothing live.
+const mapLink = (a) => a.hex && a.live ? `https://globe.adsbexchange.com/?icao=${encodeURIComponent(a.hex)}` : null;
 
 function statusChip(a) {
   if (a.status === "airborne") {
     const bits = [typeof a.alt === "number" ? num(a.alt) + " ft" : "", a.gs ? Math.round(a.gs) + " kt" : ""].filter(Boolean).join(" · ");
     return `<span class="chip air"><i class="pulse"></i>Airborne${bits ? " · " + bits : ""}</span>`;
   }
-  if (a.status === "ground") return `<span class="chip ground">On the ground</span>`;
+  if (a.status === "ground" && a.live) return `<span class="chip ground">On the ground</span>`;
+  if (a.status === "ground") return `<span class="chip unknown">Parked${a.last_seen ? " · seen " + ago(a.last_seen) : ""}</span>`;
   return `<span class="chip unknown">Not seen${a.last_seen ? " · " + ago(a.last_seen) : ""}</span>`;
 }
 
@@ -481,7 +483,7 @@ function renderWatchers(d) {
       </div>
       ${followingHtml(w)}
       ${w.aircraft.length ? sorted(w.aircraft).map((a) => {
-        const link = mapLink(a.hex);
+        const link = mapLink(a);
         const meta = [
           a.kind === "flight" ? `<span class="tag brand">Flight</span>` : "",
           a.kind === "flight" && a.reg ? `<span>flown by ${esc(a.reg)}</span>` : "",
@@ -676,7 +678,8 @@ function renderTripsBoard(d) {
 
 function fleetStatus(a) {
   if (a.status === "airborne") return [typeof a.alt === "number" ? (a.alt >= 18000 ? "FL" + Math.round(a.alt / 100) : String(Math.round(a.alt / 100) * 100)) : "---", "AIRBORNE", "y"];
-  if (a.status === "ground") return ["GND", "ON GROUND", "g"];
+  if (a.status === "ground" && a.live) return ["GND", "ON GROUND", "g"];
+  if (a.status === "ground") return ["GND", "PARKED", "m"];
   return ["---", "NO SIGNAL", "m"];
 }
 
@@ -691,10 +694,10 @@ function renderWatchersBoard(d) {
     const rows = sorted.map((a) => {
       const k = `ac:${w.topic}:${a.ident}`;
       const [alt, status, sc] = fleetStatus(a);
-      const link = mapLink(a.hex);
+      const link = mapLink(a);
       const bits = [a.label ? `<b>${esc(a.label)}</b>` : "", a.kind === "flight" && a.reg ? `flown by ${esc(a.reg)}` : "",
         a.type ? esc(a.type) : "", a.status === "airborne" && a.gs ? `${Math.round(a.gs)} kt` : "",
-        a.status !== "airborne" && a.status !== "ground" && a.last_seen ? `seen ${ago(a.last_seen)}` : "",
+        !a.live && a.last_seen ? `seen ${ago(a.last_seen)}` : "",
         a.expires ? `<span class="o">stops ${until(a.expires)}</span>` : "",
         link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">live map ↗</a>` : "",
         `<button type="button" class="linkbtn" data-act="edit-aircraft" data-topic="${esc(w.topic)}" data-ident="${esc(a.ident)}">edit</button>`].filter(Boolean);

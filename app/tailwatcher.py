@@ -42,7 +42,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.16.0"
+VERSION = "0.16.1"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/RogerUp-Labs/tailwatcher)"
 
 DATA_SOURCES = {
@@ -859,6 +859,9 @@ def run():
                 aircraft.append({
                     "ident": a["tail"], "kind": a["kind"], "label": a["label"], "expires": a["expires"],
                     "status": s_.get("status") or "unknown", "last_seen": s_.get("last_seen"),
+                    # Transponders go quiet once a plane parks, so a stored "ground"
+                    # never changes until it flies again; only a recent fix is live.
+                    "live": now - (s_.get("last_seen") or 0) <= GAP_SECONDS,
                     "hex": s_.get("hex"), "alt": fix.get("alt_baro"), "gs": fix.get("gs"),
                     "callsign": (fix.get("flight") or "").strip(), "type": fix.get("t"), "reg": fix.get("r")})
             watchers_out.append({"name": w["name"], "topic": w["topic"], "priority": w["priority"],
