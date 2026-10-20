@@ -1032,7 +1032,8 @@ function connectPhone(w) {
           <button type="button" class="btn primary" id="cp-share">Send link</button>
           <button type="button" class="btn" id="cp-copy">Copy link</button>
         </div>
-        <div class="note">No app link support? Open <a href="${esc(info.web)}" target="_blank" rel="noopener noreferrer">${esc(info.web)}</a>, or in the app tap + and enter server <b>${esc(info.host)}</b> and topic <b>${esc(w.topic)}</b>.</div></li>`
+        <div class="note">No app link support? Open <a href="${esc(info.web)}" target="_blank" rel="noopener noreferrer">${esc(info.web)}</a>, or in the app tap + and enter server <b>${esc(info.host)}</b> and topic <b>${esc(w.topic)}</b>.</div>
+        ${LAST.settings.ntfy_server !== "public" ? `<div class="note">Certificate error in the ntfy app ("Trust anchor … not found")? Their phone doesn't trust your server's https certificate yet. <button type="button" class="linkbtn help-link" data-act="help" data-section="the-ntfy-app-says-trust-anchor-for-certification-path-not-found">How to fix it</button></div>` : ""}</li>`
       : `<li>In the ntfy app, tap +, turn on "Use another server", enter your NTFY's address, and subscribe to <b>${esc(w.topic)}</b>.
         <div class="note">TailWatcher can't see an address phones can use for your NTFY. ${docker() ? "Set NTFY_PHONE_URL to the https address phones use for it" : "Give NTFY a public or LAN address in StartOS"}, and this becomes a one-tap link.</div></li>`}
       ${local && LAST.settings.ntfy_phone_mode === "login" ? `<li>Their ntfy app needs an NTFY login for your server.

@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.19.1:0',
+  version: '0.20.1:0',
   releaseNotes: {
     en_US:
-      'Fixed a misleading "can\'t read topic (HTTP 403)" message for new watchers on this server\'s NTFY: it told you to grant access on tailwatcher*, but watcher topics now start with tw-. The message now names the right permission and points to "Set up NTFY for me" in ⚙ Settings, which now also covers topics made by older versions.',
+      'Help now explains the "Trust anchor for certification path not found" error some phones get in the ntfy app with this server\'s NTFY: a Start9 signs its addresses, including a StartTunnel public IP, with its own root certificate, which phones only trust once it is installed. The fix for people outside your household is a public domain with a Let\'s Encrypt certificate through StartTunnel; for your own phones, installing the root certificate also works. Connect phone and invite pages now point to these steps.',
   },
   migrations: {
     up: async () => {},
