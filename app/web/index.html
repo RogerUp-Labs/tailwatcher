@@ -521,10 +521,21 @@ function renderTrips(d) {
     return;
   }
   $("trips").innerHTML = journeys(list).map((g) => g.length < 2 ? tripCard(g[0])
-    : `<div class="journey"><div class="j-head">⇄ Round trip · ${esc(g[0].dep_airport || "—")} ⇄ ${esc(g[1].dep_airport || g[0].arr_airport || "?")} · ${fmtDate(g[0].date)} – ${fmtDate(g[1].date)}</div>${g.map(tripCard).join("")}</div>`).join("");
+    : `<div class="journey"><div class="j-head">${journeyHead(g)}</div>${g.map(tripCard).join("")}</div>`).join("");
 }
 
-/** Trips with a round trip's flights side by side: [[t], [out, return], …] in list order. */
+/** "⇄ Round trip · IAD → DEN → LAS ⇄ … · dates" or "🔗 Connecting flights · IAD → DEN → LAS · date". */
+function journeyHead(g) {
+  const route = (legs) => [legs[0].dep_airport, ...legs.map((t, i) => t.arr_airport || (legs[i + 1] && legs[i + 1].dep_airport) || "?")]
+    .map((a) => esc(a || "—")).join(" → ");
+  const out = g.filter((t) => t.leg !== "return"), back = g.filter((t) => t.leg === "return");
+  const dates = g[0].date === g[g.length - 1].date ? fmtDate(g[0].date) : `${fmtDate(g[0].date)} – ${fmtDate(g[g.length - 1].date)}`;
+  if (!back.length) return `🔗 Connecting flights · ${route(out)} · ${dates}`;
+  if (out.length < 2 && back.length < 2) return `⇄ Round trip · ${esc(out[0].dep_airport || "—")} ⇄ ${esc(back[0].dep_airport || out[0].arr_airport || "?")} · ${dates}`;
+  return `⇄ Round trip · ${route(out)} · back ${route(back)} · ${dates}`;
+}
+
+/** Trips with a journey's flights together, in order: [[t], [out, connection, return], …] in list order. */
 function journeys(list) {
   const groups = [], seen = new Map();
   for (const t of list) {
@@ -534,11 +545,19 @@ function journeys(list) {
     groups.push(g);
     if (k) seen.set(k, g);
   }
-  return groups.map((g) => g.sort((a, b) => (a.leg === "return") - (b.leg === "return")));
+  const order = (t) => t.seq ?? (t.leg === "return" ? 1 : 0);
+  return groups.map((g) => g.sort((a, b) => order(a) - order(b)));
 }
 
-/** The other flight of t's round trip, if it's still on the list. */
-const partnerOf = (t) => t.itinerary ? LAST.trips.find((x) => x !== t && x.topic === t.topic && x.itinerary === t.itinerary) : null;
+/** The other flights of t's journey (round trip, connections) still on the list. */
+const othersOf = (t) => t.itinerary ? LAST.trips.filter((x) => x !== t && x.topic === t.topic && x.itinerary === t.itinerary) : [];
+const hasReturn = (t) => t.leg === "return" || othersOf(t).some((x) => x.leg === "return");
+/** "return", "outbound", "connection" … for a flight's place in its journey. */
+function legLabel(t) {
+  if (t.connect_from) return "connection";
+  if (t.leg === "return") return "return";
+  return hasReturn(t) ? "outbound" : "";
+}
 
 function tripCard(t) {
   const inb = t.inbound || {};
@@ -546,6 +565,9 @@ function tripCard(t) {
   const rows = [];
   if (plane) rows.push(["Your plane", `${esc(inb.tail || "")}${inb.tail && inb.flight ? " · " : ""}${esc(inb.flight || "")}${inb.origin ? ` from ${esc(inb.origin)}` : ""}${inb.arr_time ? `, due ${fmtTime(inb.arr_time)}` : ""}`]);
   if (t.departed && !t.landed && t.eta_sent) rows.push(["Arriving", `around ${fmtTime(t.eta_sent)}${t.dep_time ? ` · ${Math.round((t.dep_time - t.eta_sent) / 60)} min before you leave` : ""}`]);
+  if (t.connect_from) rows.push(["Connection", `from ${esc(t.connect_from)}${t.connect_at ? ` in ${esc(t.connect_at)}` : ""}${t.connect_min != null ? ` · ${t.connect_min} min` : ""}`]);
+  if (t.connect_to) rows.push(["Then", esc(t.connect_to)]);
+  if (t.stops && t.stops.length) rows.push(["Stops", esc(t.stops.join(", "))]);
   if (t.shared_names && t.shared_names.length) rows.push(["Shared with", esc(t.shared_names.join(", "))]);
   rows.push(["Source", t.source === "aerodatabox" ? (t.plane_locked ? "AeroDataBox (plane set by you)" : "AeroDataBox") : "Entered by text"]);
   if (t.next_check) rows.push(["Next check", `${until(t.next_check)}${t.last_check ? ` · last ${ago(t.last_check)}` : ""}`]);
@@ -557,11 +579,13 @@ function tripCard(t) {
     banner = `<div class="banner bad">⚠️ No longer listed. Renumbered or cancelled?${r ? ` Likely now <code>${esc(r.flight)}</code> at ${fmtTime(r.dep_time)}. Text <code>change ${t.number} ${esc(r.flight)}</code> to switch.` : ` Text <code>change ${t.number} NEW123</code> with the new number.`}</div>`;
   } else if (t.late && !t.landed) banner = `<div class="banner bad">⚠️ Your plane may land less than 20 minutes before your departure.</div>`;
   else if (t.tight && !t.landed) banner = `<div class="banner warn">⏳ Tight turnaround: under 45 minutes between your plane landing and your departure.</div>`;
+  else if (t.connect_min != null && t.connect_min < 0) banner = `<div class="banner bad">⚠️ ${esc(t.flight)} leaves before ${esc(t.connect_from)} gets in. Check with the airline.</div>`;
+  else if (t.connect_min != null && t.connect_min < 40) banner = `<div class="banner warn">⏳ Tight connection: ${t.connect_min} min from ${esc(t.connect_from)} landing to ${esc(t.flight)} leaving.</div>`;
   return `<article class="trip">
     <div class="t-top">
       <span class="t-flight">${esc(t.flight)}</span>
       <span class="t-when">${t.dep_time ? `${fmtDay(t.dep_time)} · ${fmtTime(t.dep_time)}` : fmtDate(t.date)}</span>
-      <span class="t-who">${esc(t.watcher)} · trip ${t.number}${t.leg === "return" ? " · return" : partnerOf(t) ? " · outbound" : ""}</span>
+      <span class="t-who">${esc(t.watcher)} · trip ${t.number}${legLabel(t) ? " · " + legLabel(t) : ""}</span>
     </div>
     <div class="route">
       <div class="apt">${esc(t.dep_airport || "—")}<small>${t.dep_time ? "departs " + until(t.dep_time) : "departure"}</small></div>
@@ -655,7 +679,10 @@ function renderTripsBoard(d) {
     const k = `trip:${t.topic}:${t.flight}:${t.date}`;
     const when = t.dep_time ? (t.dep_time - NOW < 36 * 3600 ? hhmm(t.dep_time) : mmdd(t.dep_time)) : t.date.slice(5).replace("-", "/");
     const [status, sc] = tripStatus(t);
-    const sub = t.leg === "return" && partnerOf(t) ? [`↩ return of ${esc(partnerOf(t).flight)}`] : [];
+    const first = othersOf(t).find((x) => x.leg !== "return");
+    const sub = t.connect_from ? [`🔗 from ${esc(t.connect_from)}${t.connect_at ? ` at ${esc(apt(t.connect_at))}` : ""}${t.connect_min != null ? ` · <span class="${t.connect_min < 40 ? "o" : ""}">${t.connect_min} min</span>` : ""}`]
+      : t.leg === "return" && first ? [`↩ return of ${esc(first.flight)}`] : [];
+    if (t.stops && t.stops.length) sub.push(`stops ${esc(t.stops.map(apt).join(", "))}`);
     const route = `<span class="only-narrow">${esc(apt(t.dep_airport) || "—")}→${esc(apt(t.arr_airport) || "?")} · </span>`;
     if (inb.tail || inb.flight) {
       sub.push(`your plane <b>${esc(inb.tail || inb.flight)}</b>${inb.tail && inb.flight ? ` as ${esc(inb.flight)}` : ""}${inb.origin ? ` from ${esc(apt(inb.origin))}` : ""}`);
@@ -823,16 +850,25 @@ const localDate = (t) => new Intl.DateTimeFormat("en-CA", {timeZone: TZ}).format
 function tripForm(t) {
   const inb = (t && t.inbound) || {};
   const adb = LAST.settings.aerodatabox;
-  const partner = t ? partnerOf(t) : null;
-  const canAddReturn = !t || (t.leg !== "return" && !partner);
+  const others = t ? othersOf(t) : [];
+  const canAddReturn = !t || !hasReturn(t);
+  const canConnect = !t || !t.connect_to;
+  const connFields = (prefix, label, hint) => [
+    {type: "heading", label, hint},
+    [{name: prefix + "flight", label: "Connecting flight", placeholder: "UA567"},
+     {name: prefix + "time", label: "Departs", type: "time", hint: adb ? "Optional with AeroDataBox" : "Local time where it leaves"}],
+    {name: prefix + "plane", label: "Plane flying in", placeholder: "N12345 or UA890", hint: adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the connection)."},
+  ];
   const fields = [
     ...(t ? [] : [{name: "topic", label: "For", type: "select", options: watcherOptions()}]),
     [{name: "flight", label: "Your flight", value: t ? t.flight : "", placeholder: "UA1234", required: true},
      {name: "date", label: "Date", type: "date", value: t ? t.date : localDate(NOW)}],
     [{name: "time", label: "Departs", type: "time", value: t && t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", hint: adb && !t ? "Optional with AeroDataBox" : "Local time where it leaves"},
      {name: "airport", label: "From airport", value: t ? apt(t.dep_airport) : "", placeholder: "IAD", hint: "Optional"}],
+    {name: "to", label: "Getting off at", value: t ? apt(t.get_off) : "", placeholder: "DEN", hint: "Optional: only for a flight that stops on the way and you get off early"},
     {name: "plane", label: "Plane flying in", value: inb.tail || inb.flight || "", placeholder: "N38473 or UA567",
      hint: adb ? "Leave blank and AeroDataBox finds it. See ? Help → Trips." : "From your airline app's \"Where's my plane?\" screen. See ? Help → Trips."},
+    ...(canConnect ? connFields("conn_", "Connecting flight", "Optional: the next flight after this one. I'll tell you how long you'll have to make it.") : []),
     ...(canAddReturn ? [
       {type: "heading", label: "Return flight", hint: "Optional: your flight home, tracked as part of the same trip."},
       [{name: "ret_flight", label: "Return flight", placeholder: "UA5678"},
@@ -840,15 +876,16 @@ function tripForm(t) {
       [{name: "ret_time", label: "Departs", type: "time", hint: adb ? "Optional with AeroDataBox" : "Local time where it leaves"},
        {name: "ret_airport", label: "From airport", placeholder: "LAS", hint: "Blank: where you land"}],
       {name: "ret_plane", label: "Plane flying in", placeholder: "N12345 or UA567", hint: adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the return)."},
+      ...(t ? [] : connFields("ret_conn_", "Return connection", "Optional: the next flight after the return.")),
     ] : []),
     {name: "share", label: "Share with", type: "checks", value: t ? t.shared_with : [],
      options: LAST.watchers.filter((w) => !t || w.topic !== t.topic).map((w) => [w.topic, w.name]),
-     hint: partner ? `Covers both flights (${t.flight} and ${partner.flight}). They get each flight's departure and landing, nothing else.`
+     hint: others.length ? `Covers every flight of this trip (${[t, ...others].map((x) => x.flight).join(", ")}). They get each flight's departure and landing, nothing else.`
        : "They get your flight's departure and landing, nothing else."},
   ];
   if (!t) return openForm({title: "Add trip", fields, saveLabel: "Add trip",
     save: (v) => api("api/trip", {op: "add", ...v, share: (v.share || []).filter((x) => x !== v.topic)})});
-  const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", airport: apt(t.dep_airport), plane: inb.tail || inb.flight || ""};
+  const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", airport: apt(t.dep_airport), to: apt(t.get_off), plane: inb.tail || inb.flight || ""};
   openForm({title: `Edit ${t.flight} · ${t.watcher}`, fields,
     save: (v) => {
       const {share = [], ...rest} = v;
@@ -857,10 +894,10 @@ function tripForm(t) {
       if (!Object.keys(changes).length && !shareChanged) return Promise.resolve({ok: true, message: "Nothing changed."});
       return api("api/trip", {op: "change", topic: t.topic, number: t.number, ...changes, ...(shareChanged ? {share} : {})});
     },
-    remove: partner
-      ? {label: "Cancel both", confirm: `Stop tracking ${t.flight} and ${partner.flight}?`, run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number})}
+    remove: others.length
+      ? {label: others.length > 1 ? "Cancel all" : "Cancel both", confirm: `Stop tracking ${[t, ...others].map((x) => x.flight).join(", ")}?`, run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number})}
       : {label: "Cancel trip", confirm: `Stop tracking ${t.flight}?`, run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number})},
-    remove2: partner ? {label: `Cancel ${t.flight}`, confirm: `Stop tracking ${t.flight} and keep ${partner.flight}?`,
+    remove2: others.length ? {label: `Cancel ${t.flight}`, confirm: `Stop tracking ${t.flight} and keep ${others.map((x) => x.flight).join(", ")}?`,
       run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number, only: true})} : null});
 }
 
@@ -1243,8 +1280,8 @@ function onAction(btn) {
   }
   if (act === "edit-trip" && t) return tripForm(t);
   if (act === "cancel-trip" && t) {
-    const p = partnerOf(t);
-    if (confirm(p ? `Stop tracking ${t.flight} and ${p.flight}? (To keep one, use Edit.)` : `Stop tracking ${t.flight}?`)) api("api/trip", {op: "cancel", topic, number: t.number}).then((r) => { toast(r.message); load(); });
+    const p = othersOf(t);
+    if (confirm(p.length ? `Stop tracking ${[t, ...p].map((x) => x.flight).join(", ")}? (To keep some, use Edit.)` : `Stop tracking ${t.flight}?`)) api("api/trip", {op: "cancel", topic, number: t.number}).then((r) => { toast(r.message); load(); });
     return;
   }
   if (act === "add-watcher") return watcherForm(null);

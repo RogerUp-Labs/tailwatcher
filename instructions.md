@@ -55,11 +55,13 @@ People can manage their own list by typing in their topic in the ntfy app (the m
 | `info N12345` | Look up any aircraft: what it is, who owns it, where it is now |
 | `inbound UA1234 N38473 dep 4:30pm` | Follow the plane flying in for your flight |
 | `inbound UA1234 11/14 return UA5678 11/21` | A round trip: your flight out and your flight home together |
+| `inbound UA1234 then UA567` | A connecting flight: I'll tell you how long you'll have to make it |
 | `return 1 UA5678 11/21` | Add the flight home to trip 1 |
+| `connect 1 UA567` | Add a connecting flight after trip 1 |
 | `trips` | Your trips, numbered |
-| `change 1 AA5678` | Update trip 1: a new flight number, `dep 5:10pm`, a plane, a date `11/15` or `from DFW` |
-| `share 1 Mom & Dad` | Send another watcher your flight's departure and landing (`unshare` to stop). Covers both flights of a round trip |
-| `cancel 1` | Stop tracking trip 1 (and its return; `cancel 1 only` for just that flight) |
+| `change 1 AA5678` | Update trip 1: a new flight number, `dep 5:10pm`, a plane, a date `11/15`, `from DFW` or `to DEN` |
+| `share 1 Mom & Dad` | Send another watcher your flight's departure and landing (`unshare` to stop). Covers every flight of the trip |
+| `cancel 1` | Stop tracking trip 1 (and its connections and return; `cancel 1 only` for just that flight) |
 | `help` | Show the commands |
 
 A plane you add is checked right away; if it's already flying, the "airborne" alert arrives within seconds. Entries with an end date remove themselves ("⌛ Stopped watching UA1234"). Each person can only change their own list. Text commands can be turned off in **⚙ Settings**.
@@ -85,6 +87,15 @@ Before a flight, the plane you'll fly on is usually still finishing an earlier f
 - Both flights are listed together and numbered one after the other. `change` edits one flight; `share` and `cancel` cover both, unless you add `only` (`cancel 2 only`).
 - With an AeroDataBox key, each flight is checked on its own schedule, so a round trip booked a month ahead uses about 40 of the 400 free monthly requests.
 
+**Connecting flights.** Changing planes on the way? Add the next flight with `then`: `inbound UA1234 11/14 then UA567`, or fill in **Connecting flight** on **+ Add trip**. It works on the way back too: `… return UA5678 11/21 then UA910`. Already added the first flight? Text `connect 1 UA567`. Up to 4 flights in a row each way.
+
+- A connection is on the same day as the flight before it and leaves from where that flight lands. A time earlier than the first flight's means the next morning. Add a date or `from DEN` if not.
+- Without an AeroDataBox key, give the connection its own time and plane: `inbound UA1234 N38473 dep 8am from IAD then UA567 N12345 dep 1:10pm from DEN`. Add `from` when the connection leaves from another time zone, so the time is read right.
+- On the day, TailWatcher follows your first flight once it takes off and tells you how many minutes you'll have to make the next one, ⏳ if that drops under 40 minutes, ⚠️ under 15, and 🛬 when you land with how long until your connection leaves. With an AeroDataBox key it also warns ahead of time if the scheduled connection is tight or doesn't work.
+- Each flight still gets its own where's-my-plane alerts. All the flights are listed and numbered together; `share` and `cancel` cover them all unless you add `only`.
+
+**A flight with a stop** (one flight number, e.g. Chicago → Denver → Las Vegas): with an AeroDataBox key TailWatcher assumes you board where the flight starts and stay on to the end, and says so. Add `from DEN` if you board at the stop, or `to DEN` if you get off there. Family you share it with get the landing alert at your destination, not at the stop.
+
 **If the airline renumbers or cancels your flight**, TailWatcher notices on its next check, tells you, and suggests the likely new flight number. Reply with the `change` it suggests to switch; it never switches by itself.
 
 Arrival estimates come from the plane's live position and speed, so treat them as an early warning rather than the airline's official time. Trips clear themselves a few hours after departure.
@@ -93,7 +104,7 @@ Arrival estimates come from the plane's live position and speed, so treat them a
 
 Your trip alerts are about the plane coming to get *you*; family usually wants to know when your flight leaves and lands. Tick their names under **Share with** on the trip form, or text `share 1 Mom & Dad`.
 
-They get a note that you shared a flight, a heads-up if the time changes or the flight disappears (with an AeroDataBox key), and departure and landing alerts on the day. They don't get your inbound-plane updates. TailWatcher follows your flight only around departure, so a flight shared weeks ahead won't alert on the other days it flies. Changing or cancelling the trip updates them too. Sharing a round trip covers both flights, with one note listing both.
+They get a note that you shared a flight, a heads-up if the time changes or the flight disappears (with an AeroDataBox key), and departure and landing alerts on the day. They don't get your inbound-plane updates. TailWatcher follows your flight only around departure, so a flight shared weeks ahead won't alert on the other days it flies. Changing or cancelling the trip updates them too. Sharing a round trip or connecting flights covers every flight, with one note listing them all. When you land somewhere to change planes, their landing alert says which flight you're connecting to.
 
 ## Looking up a plane
 

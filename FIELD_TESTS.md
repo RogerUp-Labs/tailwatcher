@@ -49,6 +49,8 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 | R13 | AeroDataBox requests for a month-out trip stay around 20 | | Check the RapidAPI dashboard |
 | R14 | Outbound **and** return trips for the same journey both work | ⏳ | Booked trip next month |
 | R15 | Round trip entered in one step (`inbound … return …` or the Return flight row): both legs listed together, return leaves from the outbound's destination, `share`/`cancel` cover both (`only` for one) | | 0.16.0 |
+| R16 | Connecting flights (`inbound … then …`, `connect 1 …` or the Connecting flight row): listed together, connection leaves from where the first lands, "X min to make" alert after takeoff, 🛬 landing note with time to the connection, `share`/`cancel` cover all | | 0.17.0 |
+| R17 | Flight with a stop under one number: route and stop shown, `from`/`to` the stop picks your part, family's landing alert only at the real destination | | 0.17.0 |
 
 ## 4. Sharing and other people's phones
 
@@ -99,6 +101,7 @@ Status: ✅ passed · ⚠️ partly / with issues · ❌ failed · blank = not t
 
 ## Ideas from testing
 
+- **Layovers:** connecting flights and one-number flights with a stop. Asked 2026-10-20; done in 0.17.0, test as R16/R17.
 - **Itineraries:** enter the outbound and return flights together (and share both at once) instead of two separate trips. From the 2026-10-19 test. Done in 0.16.0 (round trips); test as R15, e.g. by linking next month's two trips with `return 1 …`.
 
 ## Log

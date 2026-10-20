@@ -479,19 +479,18 @@ class ItineraryTest(unittest.TestCase):
         return trips.parse_itinerary(text, NOON, TZ, AIR)
 
     def store(self, text, topic="sam"):
-        out, ret = self.parse(text)
-        out["topic"] = topic
-        if ret is None:
-            trips.add(out, self.path)
-            return out
-        ret["topic"] = topic
-        trips.add_journey(out, ret, self.path)
-        return out, ret
+        legs = self.parse(text)
+        for t in legs:
+            t["topic"] = topic
+        if len(legs) == 1:
+            trips.add(legs[0], self.path)
+            return legs[0]
+        trips.add_journey(legs, self.path)
+        return legs
 
     def test_one_flight_is_unchanged(self):
-        out, ret = self.parse("UA1234 N38473 dep 4:30pm")
-        self.assertIsNone(ret)
-        self.assertEqual(out["flight"], "UA1234")
+        [out] = self.parse("UA1234 N38473 dep 4:30pm")
+        self.assertEqual((out["flight"], out["leg"], out["seq"]), ("UA1234", None, None))
 
     def test_outbound_and_return(self):
         out, ret = self.parse("UA1234 11/14 return UA5678 11/21")
@@ -590,3 +589,161 @@ class ItineraryTest(unittest.TestCase):
         self.assertEqual(commands.parse("return 1 UA5678 11/21")[:2], ("return", "1 UA5678 11/21"))
         self.assertEqual(commands.parse("inbound UA1 11/14 return UA2 11/21")[:2], ("inbound", "UA1 11/14 return UA2 11/21"))
         self.assertEqual(trips.split_only("Mom only"), ("Mom", True))
+
+
+class ConnectionTest(unittest.TestCase):
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+
+    def tearDown(self):
+        os.unlink(self.path)
+
+    def parse(self, text):
+        return trips.parse_itinerary(text, NOON, TZ, AIR)
+
+    def store(self, text, topic="sam"):
+        legs = self.parse(text)
+        for t in legs:
+            t["topic"] = topic
+        trips.add_journey(legs, self.path)
+        return trips.for_topic(topic, self.path)
+
+    def test_connections_parse(self):
+        legs = self.parse("UA1234 N1 11/14 dep 8am from IAD then UA567 N2 dep 1:10pm from DEN then UA89 dep 6am")
+        self.assertEqual([(t["flight"], t["leg"], t["seq"]) for t in legs],
+                         [("UA1234", "out", 0), ("UA567", "out", 1), ("UA89", "out", 2)])
+        self.assertEqual(legs[1]["date"], "2026-11-14")                     # same day as the flight before
+        self.assertEqual(legs[1]["dep_time"], ts(2026, 11, 14, 15, 10))     # 1:10pm in Denver
+        self.assertEqual((legs[2]["date"], legs[2]["dep_time"]), ("2026-11-15", ts(2026, 11, 15, 6)))  # overnight
+
+    def test_connections_both_ways(self):
+        legs = self.parse("UA1234 11/14 then UA567 return UA5678 11/21 connecting UA910")
+        self.assertEqual([(t["flight"], t["leg"], t["date"]) for t in legs],
+                         [("UA1234", "out", "2026-11-14"), ("UA567", "out", "2026-11-14"),
+                          ("UA5678", "return", "2026-11-21"), ("UA910", "return", "2026-11-21")])
+
+    def test_connection_errors(self):
+        self.assertIn("Which flight is the connection", self.parse("UA1 11/14 then"))
+        self.assertTrue(self.parse("UA1 11/14 then banana").startswith("❌ Connection:"))
+        self.assertIn("is before", self.parse("UA1 11/14 then UA2 11/10"))
+        self.assertIn("up to 4 flights", self.parse("UA1 then UA2 then UA3 then UA4 then UA5"))
+
+    def test_numbered_and_described_together(self):
+        self.store("DL89 11/16")
+        mine = self.store("UA1234 11/14 dep 8am then UA567 dep 1:10pm return UA5678 11/21 dep 9am")
+        self.assertEqual([t["flight"] for t in mine], ["UA1234", "UA567", "UA5678", "DL89"])
+        self.assertIs(trips.connects_to(mine[0], mine), mine[1])
+        self.assertIs(trips.connects_from(mine[1], mine), mine[0])
+        self.assertIsNone(trips.connects_to(mine[1], mine))                 # the return isn't a connection
+        self.assertIs(trips.prev_leg(mine[2], mine), mine[1])
+        mine[0]["arr_airport"], mine[0]["arr_time"] = "KDEN", ts(2026, 11, 14, 12, 15)
+        listing = trips.describe_all(mine, TZ)
+        self.assertIn("2. 🔗 Connection UA567 · Sat Nov 14, departs 1:10pm", listing)
+        self.assertIn("Connecting from UA1234 in KDEN: 55 min after it gets in.", listing)
+        self.assertIn("3. ↩ Return UA5678", listing)
+
+    def test_connect_command_inserts_after_its_flight(self):
+        mine = self.store("UA1 11/14 return UA2 11/21")
+        trips.modify_legs("sam", "1", lambda legs, r: (trips.share_with(legs[0], ["mom"], "sam"), True),
+                          NOON, TZ, self.path)
+        conn = trips.parse_connection(mine[0], "UA3 dep 3pm", NOON, TZ, AIR)
+        conn["topic"] = "sam"
+        trips.attach(mine[0], conn, True, self.path)
+        mine = trips.for_topic("sam", self.path)
+        self.assertEqual([(t["flight"], t["leg"], t["seq"]) for t in mine],
+                         [("UA1", "out", 0), ("UA3", "out", 1), ("UA2", "return", 2)])
+        self.assertEqual(mine[1]["shared_with"], ["mom"])
+        gone = lambda legs, rest: (" ".join(t["flight"] for t in legs), False)  # noqa: E731
+        self.assertEqual(trips.modify_legs("sam", "2", gone, NOON, TZ, self.path), "UA1 UA3 UA2")
+        self.assertEqual(commands.parse("connect 1 UA567 dep 2pm")[:2], ("connect", "1 UA567 dep 2pm"))
+
+    def test_shared_trip_with_a_connection(self):
+        legs = self.parse("UA1234 N1 11/14 dep 8am from IAD then UA567 N2 dep 1:10pm from DEN")
+        title, msg, _ = trips.share_announcement(legs, "Sam", TZ)
+        self.assertEqual(title, "📣 Sam shared a trip with you")
+        self.assertIn("\nThen: UA567 · Sat Nov 14, departs 3:10pm from KDEN.", msg)
+
+    def test_connection_alerts_in_flight(self):
+        first, second = self.parse("UA1234 N1 10/21 dep 8am from IAD then UA567 N2 dep 9:30am from DEN")
+        first["arr_airport"] = "KDEN"
+        self.assertTrue(trips.own_live(first, ts(2026, 10, 21, 7), connecting=True))
+        self.assertFalse(trips.own_live(first, ts(2026, 10, 21, 7)))         # not shared, nothing to connect to
+        fix = {"lat": 38.95, "lon": -77.45, "alt_baro": 3000, "gs": 200}
+        self.assertEqual(trips.own_event(first, "departed", fix, AIR), "departed")
+        # ~1270 nm to Denver at 420 kt: due ~11:12am at home, 17 min before UA567 leaves (9:30am Denver).
+        out = trips.connection_step(first, second, fix, "departed", ts(2026, 10, 21, 8, 5), AIR, TZ)
+        self.assertEqual(out[0][0], "✈️ UA1234 is on its way to KDEN")
+        self.assertIn("That leaves 17 min to make UA567 (departs 11:30am)", out[0][1])
+        self.assertEqual(out[0][2], 4)
+        self.assertEqual(trips.connection_step(first, second, fix, None, ts(2026, 10, 21, 8, 6), AIR, TZ), [])
+        ground = {"lat": 39.86, "lon": -104.67, "alt_baro": "ground"}
+        self.assertEqual(trips.own_event(first, "landed", ground, AIR), "landed")
+        out = trips.connection_step(first, second, ground, "landed", ts(2026, 10, 21, 11), AIR, TZ)
+        self.assertEqual(out[0][0], "🛬 UA1234 landed in KDEN")
+        self.assertIn("UA567 departs at 11:30am, 30 min from now.", out[0][1])
+        self.assertEqual(trips.connection_step(first, second, ground, None, ts(2026, 10, 21, 11, 1), AIR, TZ), [])
+
+    def test_tight_connection_warned_before_flying(self):
+        first, second = self.parse("UA1234 11/14 then UA567 dep 2pm")
+        first.update(arr_airport="KDEN", arr_time=ts(2026, 11, 14, 13, 30))
+        out = trips.connection_notes(first, second, TZ)
+        self.assertEqual(out[0][0], "⏳ Tight connection in KDEN")
+        self.assertIn("30 min to change planes", out[0][1])
+        self.assertEqual(trips.connection_notes(first, second, TZ), [])     # said once
+        first["arr_time"] = ts(2026, 11, 14, 14, 10)
+        self.assertIn("doesn't work", trips.connection_notes(first, second, TZ)[0][0])
+
+
+THROUGH = [  # UA 1234 IAD→ORD→DEN, one flight number with a stop
+    {"number": "UA 1234", "callSign": "UAL1234", "departure": movement("KIAD", "2026-10-20 13:00Z"),
+     "arrival": movement("KORD", "2026-10-20 15:00Z"), "aircraft": {"reg": "N38473"}},
+    {"number": "UA 1234", "callSign": "UAL1234", "departure": movement("KORD", "2026-10-20 16:00Z"),
+     "arrival": movement("KDEN", "2026-10-20 18:30Z"), "aircraft": {"reg": "N38473"}},
+]
+
+
+class ThroughFlightTest(unittest.TestCase):
+    def resolve(self, text, plane_day=None):
+        trip = trips.parse_inbound(text, NOON, TZ, AIR)
+        responses = [THROUGH, plane_day or THROUGH]
+        trips.resolve(trip, "k", "ua", sleep=lambda s: None,
+                      get=lambda key, path, params, ua: responses.pop(0))
+        return trip
+
+    def test_whole_flight_by_default(self):
+        t = self.resolve("UA1234")
+        self.assertEqual((t["dep_airport"], t["arr_airport"], t["stops"]), ("KIAD", "KDEN", ["KORD"]))
+        self.assertEqual(t["route"], ["KIAD", "KORD", "KDEN"])
+        self.assertIn("stops in KORD on the way to KDEN", trips.describe(t, TZ))
+        self.assertIn('UA1234 flies IAD→ORD→DEN that day; I\'m following IAD→DEN.', trips.describe(t, TZ))
+
+    def test_get_off_at_the_stop(self):
+        t = self.resolve("UA1234 to ORD")
+        self.assertEqual((t["dep_airport"], t["arr_airport"], t["stops"]), ("KIAD", "KORD", []))
+        self.assertEqual(t["arr_time"], ts(2026, 10, 20, 11))
+
+    def test_board_at_the_stop(self):
+        t = self.resolve("UA1234 from ORD")
+        self.assertEqual((t["dep_airport"], t["arr_airport"], t["stops"]), ("KORD", "KDEN", []))
+        self.assertEqual(t["dep_time"], ts(2026, 10, 20, 12))
+        # The plane coming in is your own flight number's first leg.
+        self.assertEqual((t["inbound"]["flight"], t["inbound"]["origin"]), ("UA1234", "KIAD"))
+        self.assertTrue(trips.boards_midway(t))
+        # Following it in: its usual route says Denver, but it's on its way to you.
+        fix = {"lat": 40.0, "lon": -80.0, "alt_baro": 30000, "gs": 450, "flight": "UAL1234"}
+        out = trips.step(t, fix, ts(2026, 10, 20, 9, 30), AIR, TZ, lambda trip, cs: "KDEN")
+        self.assertIn("on its way", out[0][0])
+        # Shared alerts: the takeoff from Dulles isn't yours; Chicago's is.
+        self.assertIsNone(trips.own_event(t, "airborne", fix, AIR))
+        self.assertEqual(trips.own_event(t, "departed", {"lat": 41.98, "lon": -87.9, "alt_baro": 500}, AIR),
+                         "departed")
+
+    def test_landing_at_a_stop_is_not_the_landing(self):
+        t = self.resolve("UA1234")
+        self.assertEqual(trips.own_event(t, "departed", {"lat": 38.95, "lon": -77.45, "alt_baro": 500}, AIR),
+                         "departed")
+        self.assertIsNone(trips.own_event(t, "landed", {"lat": 41.98, "lon": -87.9, "alt_baro": "ground"}, AIR))
+        self.assertIsNone(trips.own_event(t, "departed", {"lat": 41.98, "lon": -87.9, "alt_baro": 500}, AIR))
+        self.assertEqual(trips.own_event(t, "landed", {"lat": 39.86, "lon": -104.67, "alt_baro": "ground"}, AIR),
+                         "landed")

@@ -46,10 +46,12 @@ HELP = (
     "• inbound UA1234 N38473 dep 4:30pm — follow the plane flying in for your flight\n"
     "  (with an AeroDataBox key in Configure, just: inbound UA1234)\n"
     "• inbound UA1234 11/14 return UA5678 11/21 — both flights of a round trip at once\n"
+    "• inbound UA1234 then UA567 — a connecting flight; I'll tell you how long you'll have to make it\n"
     "• return 1 UA5678 11/21 — add the flight home to trip 1\n"
+    "• connect 1 UA567 — add a connecting flight after trip 1\n"
     "• trips — your trips, numbered\n"
-    "• change 1 AA5678 / change 1 dep 5:10pm / change 1 N38473 / change 1 11/15 — update trip 1\n"
-    "• cancel 1 — stop tracking trip 1 (and its return; cancel 1 only for just that flight)\n"
+    "• change 1 AA5678 / change 1 dep 5:10pm / change 1 N38473 / change 1 11/15 / change 1 to DEN — update trip 1\n"
+    "• cancel 1 — stop tracking trip 1 (and the rest of its trip; cancel 1 only for just that flight)\n"
     "• share 1 Mom & Dad — send them your flight's departure and landing (unshare 1 Mom & Dad to stop)"
 )
 
@@ -130,7 +132,7 @@ def merge_flight_words(words, i):
 def parse(text, now=None, tz=DEFAULT_TZ):
     """Parse a message into (verb, ident, label, expires).
 
-    verb is add/remove/list/help/info/inbound/return/trips/cancel/change/share/unshare/unknown; ident is the tail or flight number
+    verb is add/remove/list/help/info/inbound/return/connect/trips/cancel/change/share/unshare/unknown; ident is the tail or flight number
     as typed; expires is a Unix time or None.
     """
     now = time.time() if now is None else now
@@ -150,6 +152,8 @@ def parse(text, now=None, tz=DEFAULT_TZ):
         return "trips", None, "", None
     if first == "return" and len(words) >= 3:
         return "return", " ".join(words[1:]), "", None  # "return 1 UA5678 11/21", parsed by trips
+    if first in ("connect", "then") and len(words) >= 3:
+        return "connect", " ".join(words[1:]), "", None  # "connect 1 UA567 dep 2pm", parsed by trips
     if first in ("cancel",) and len(words) >= 2:
         return "cancel", " ".join(words[1:]), "", None  # "2", "AA1234" or "AA1234 11/14"
     if first in ("share", "unshare") and len(words) >= 3:

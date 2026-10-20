@@ -17,10 +17,18 @@ touches them) and are removed a few hours after departure. "trips" numbers
 them soonest first; "change 2 …" and "cancel 2" act on that numbering.
 
 Itineraries: "inbound UA1234 11/14 return UA5678 11/21" adds both flights of
-a round trip. Each is an ordinary trip (checks, tracking and "change" work
-per flight), linked by a shared "itinerary" id with leg "out" or "return".
-Legs are numbered together, and "cancel"/"share" act on both unless told
-"only".
+a round trip, and "then UA567" adds a connecting flight ("inbound UA1234 then
+UA567 return UA5678 11/21 then UA910"). Each flight is an ordinary trip
+(checks, tracking and "change" work per flight), linked by a shared
+"itinerary" id with leg "out" or "return" (the direction) and seq (its place
+in the journey). Two flights in a row with the same leg are a connection:
+TailWatcher follows the first one on ADS-B and says how long you'll have to
+make the second. Legs are numbered together, and "cancel"/"share" act on the
+whole journey unless told "only".
+
+Through flights (one flight number with a stop, A→B→C): "from B" / "to B"
+say which part you fly; without them you board at the first airport you
+named (or the first leg) and stay on to the end.
 """
 
 import datetime
@@ -56,6 +64,10 @@ LATE_MIN = 20           # ...and again at this, as a likely delay
 ETA_SHIFT_MIN = 15      # re-announce the arrival estimate when it moves this much
 CLIMB_ASSUMED_KT = 420  # see estimate_arrival
 LANDED_NM = 5           # on the ground within this of your airport = arrived
+STOP_NM = 50            # your own flight near a stop on its route: that's the stop, not your landing
+CONNECT_TIGHT_MIN = 40  # warn when you'll have less than this to make a connecting flight
+CONNECT_MISS_MIN = 15   # ...and again at this, as a likely miss
+MAX_LEGS = 4            # connecting flights in a row, each way
 KEEP_AFTER_DEP_H = 3    # drop a trip this long after its departure
 KEEP_UNDATED_H = 36     # ...or this long after it was added, with no departure time
 
@@ -69,9 +81,10 @@ USAGE = (
     "inbound UA1234 N38473 dep 4:30pm\n"
     "(the plane is in your airline app under \"Where's my plane?\"; a flight number like UA567 works too). "
     "Add \"tomorrow\" or a date like 10/20, and \"from IAD\" if it isn't obvious. "
-    "Flying back too? Add \"return UA5678 11/21\"."
+    "Connecting? Add \"then UA567\". Flying back too? Add \"return UA5678 11/21\"."
 )
 RETURN_WORDS = ("return", "returning")
+CONNECT_WORDS = ("then", "connecting", "connect")
 
 
 # --------------------------------------------------------------- parsing
@@ -82,16 +95,19 @@ def scan(words, now, tz_name, airports):
 
     Returns a dict with: idents [(kind, shown, key, marked_as_plane)] in order,
     day / explicit_day (a date), clock ((h, m) or None), airport (ICAO or None),
-    or an error string.
+    to (ICAO where you get off, or None), or an error string.
     """
     tz = commands.zone(tz_name)
     today = datetime.datetime.fromtimestamp(now, tz).date()
-    out = {"idents": [], "day": today, "explicit_day": False, "clock": None, "airport": None}
+    out = {"idents": [], "day": today, "explicit_day": False, "clock": None, "airport": None, "to": None}
     plane_next = False
     i = 0
     while i < len(words):
         w, low = words[i], words[i].lower()
         nxt = words[i + 1] if i + 1 < len(words) else ""
+        if low == "to" and nxt.isalpha() and 3 <= len(nxt) <= 4 and resolve_airport(nxt, airports):
+            out["to"], i = resolve_airport(nxt, airports), i + 2  # where you get off a through flight
+            continue
         if low in ("dep", "departs", "departing", "leaves", "at", "on", "to", "now"):
             i += 1
             continue
@@ -165,13 +181,16 @@ def departure_time(day, clock, explicit_day, now, tz_name):
     return local.timestamp(), local.date()
 
 
-def parse_inbound(text, now, tz_name, airports, need_date=False, default_airport=None):
-    """Parse "UA1234 [N38473|UA567] [dep] [4:30pm] [tomorrow|10/20] [from IAD]".
+def parse_inbound(text, now, tz_name, airports, need_date=False, default_airport=None,
+                  default_day=None, after=None):
+    """Parse "UA1234 [N38473|UA567] [dep] [4:30pm] [tomorrow|10/20] [from IAD] [to DEN]".
 
     Returns a new trip dict, or an error string to send back. need_date: the
     flight home has no sensible default day. default_airport: where it leaves
     from without "from" (the return leaves from where the outbound lands).
-    A typed time is in the departure airport's time zone.
+    default_day / after: a connecting flight is on the same day as the one
+    before it, and a time earlier than `after` (that flight's departure) is
+    the next day. A typed time is in the departure airport's time zone.
     """
     words = commands.merge_flight_words((text or "").split(), 0)
     if not words:
@@ -187,19 +206,30 @@ def parse_inbound(text, now, tz_name, airports, need_date=False, default_airport
     if need_date and not f["explicit_day"]:
         return f"🤔 Which day is {flight[0]}? Add its date, e.g. \"{flight[0]} 11/21\"."
     day, dep_time, airport = f["day"], None, f["airport"] or default_airport
+    explicit = f["explicit_day"]
+    if default_day and not explicit:
+        day, explicit = default_day, True
     if f["clock"]:
-        dep_time, day = departure_time(day, f["clock"], f["explicit_day"], now,
-                                       airport_zone(airport, airports, tz_name))
+        zone = airport_zone(airport, airports, tz_name)
+        dep_time, day = departure_time(day, f["clock"], explicit, now, zone)
+        if after and not f["explicit_day"] and dep_time <= after:  # an overnight connection
+            dep_time, day = departure_time(day + datetime.timedelta(days=1), f["clock"], True, now, zone)
     inbound = as_inbound(*f["idents"][0][:3]) if f["idents"] else None
-    return new_trip(flight, day.isoformat(), dep_time, airport, inbound, now)
+    trip = new_trip(flight, day.isoformat(), dep_time, airport, inbound, now)
+    trip["get_off"] = trip["arr_airport"] = f["to"]
+    return trip
+
+
+def about_leg(err, label):
+    """Label an error as being about one flight of a journey ("Return flight",
+    "Connection"), keeping its leading emoji (the Web UI reads that to tell a failure)."""
+    if err[:1] in ("❌", "🤔", "🤷") and err[1:2] == " ":
+        return f"{err[0]} {label}: {err[2:]}"
+    return f"❌ {label}: {err}"
 
 
 def about_return(err):
-    """Label an error as being about the flight home, keeping its leading emoji
-    (the Web UI reads that to tell a failure)."""
-    if err[:1] in ("❌", "🤔", "🤷") and err[1:2] == " ":
-        return f"{err[0]} Return flight: {err[2:]}"
-    return f"❌ Return flight: {err}"
+    return about_leg(err, "Return flight")
 
 
 def parse_return(outbound, text, now, tz_name, airports):
@@ -217,19 +247,66 @@ def parse_return(outbound, text, now, tz_name, airports):
     return ret
 
 
-def parse_itinerary(text, now, tz_name, airports):
-    """Parse "UA1234 … [return UA5678 11/21 …]".
+def parse_connection(prev, text, now, tz_name, airports):
+    """The connecting flight after `prev` ("UA567 [dep 2:10pm] [N123] [from DEN]").
 
-    Returns (outbound, return or None), or an error string."""
+    Same day as prev unless dated, leaving from where prev lands; a time
+    before prev's departure is the next morning. Returns a trip dict or an error string."""
+    t = parse_inbound(text, now, tz_name, airports, default_airport=prev.get("arr_airport"),
+                      default_day=datetime.date.fromisoformat(prev["date"]), after=prev.get("dep_time"))
+    if isinstance(t, str):
+        return about_leg(t, "Connection")
+    if t["date"] < prev["date"]:
+        return (f"❌ Connection: {t['flight']} on {fmt_day(t, tz_name)} is before "
+                f"{prev['flight']} on {fmt_day(prev, tz_name)}.")
+    return t
+
+
+def split_on(words, separators):
+    """["UA1", "then", "UA2"] -> [["UA1"], ["UA2"]]."""
+    parts = [[]]
+    for w in words:
+        if w.lower() in separators:
+            parts.append([])
+        else:
+            parts[-1].append(w)
+    return parts
+
+
+def parse_itinerary(text, now, tz_name, airports):
+    """Parse "UA1234 … [then UA567 …] [return UA5678 11/21 … [then UA910 …]]".
+
+    Returns the flights in order, or an error string. With more than one,
+    each has leg ("out"/"return") and seq set; add_journey() links them."""
     words = (text or "").split()
     cut = next((i for i, w in enumerate(words) if w.lower() in RETURN_WORDS), None)
-    out = parse_inbound(" ".join(words[:cut]), now, tz_name, airports)
-    if isinstance(out, str) or cut is None:
-        return out if isinstance(out, str) else (out, None)
-    if not words[cut + 1:]:
+    halves = [words] if cut is None else [words[:cut], words[cut + 1:]]
+    if cut is not None and not halves[1]:
         return "🤔 Which flight is the return? e.g. \"… return UA5678 11/21\"."
-    ret = parse_return(out, " ".join(words[cut + 1:]), now, tz_name, airports)
-    return ret if isinstance(ret, str) else (out, ret)
+    legs = []
+    for half, direction in zip(halves, ("out", "return")):
+        parts = split_on(half, CONNECT_WORDS)
+        if len(parts) > MAX_LEGS:
+            return f"🤔 I can follow up to {MAX_LEGS} flights in a row each way."
+        for n, part in enumerate(parts):
+            text_ = " ".join(part)
+            if not part and n:
+                return "🤔 Which flight is the connection? e.g. \"… then UA567\"."
+            if n:
+                t = parse_connection(legs[-1], text_, now, tz_name, airports)
+            elif direction == "return":
+                t = parse_return(legs[-1], text_, now, tz_name, airports)
+            else:
+                t = parse_inbound(text_, now, tz_name, airports)
+            if isinstance(t, str):
+                return t
+            t["leg"] = direction
+            legs.append(t)
+    for n, t in enumerate(legs):
+        t["seq"] = n if len(legs) > 1 else None
+        if len(legs) == 1:
+            t["leg"] = None
+    return legs
 
 
 def apply_change(trip, text, now, tz_name, airports):
@@ -243,7 +320,7 @@ def apply_change(trip, text, now, tz_name, airports):
     f = scan((text or "").split(), now, tz_name, airports)
     if isinstance(f, str):
         return f, False
-    if not (f["idents"] or f["clock"] or f["explicit_day"] or f["airport"]):
+    if not (f["idents"] or f["clock"] or f["explicit_day"] or f["airport"] or f["to"]):
         return "🤔 What should change? e.g. \"change 1 AA5678\", \"change 1 dep 5:10pm\", " \
                "\"change 1 N38473\" or \"change 1 11/15\".", False
     renumber = plane = None
@@ -255,6 +332,9 @@ def apply_change(trip, text, now, tz_name, airports):
     needs_lookup = False
     if f["airport"]:
         trip["dep_airport"] = f["airport"]
+    if f["to"]:
+        trip["get_off"] = trip["arr_airport"] = f["to"]
+        trip["stops"] = []  # the next AeroDataBox check fills these in again
     zone = airport_zone(trip.get("dep_airport"), airports, tz_name)
     if renumber and renumber[0] != trip["flight"]:
         trip["flight"], trip["callsign"] = renumber
@@ -290,8 +370,14 @@ def new_trip(flight, date, dep_time, dep_airport, inbound, now):
         "inbound": inbound, "source": "manual" if inbound else "aerodatabox",
         "checkpoints": list(CHECKPOINT_HOURS), "last_check": None,
         "created": now, "plane_locked": bool(inbound),
-        # Round trips: both flights share an itinerary id; leg is "out" or "return".
-        "itinerary": None, "leg": None,
+        # Journeys (round trips, connections): every flight shares an itinerary
+        # id; leg is "out" or "return", seq its place in the journey.
+        "itinerary": None, "leg": None, "seq": None,
+        # Where you get off ("to DEN"), and for a flight number with stops,
+        # its whole route and the stops on your part of it.
+        "get_off": None, "route": [], "stops": [], "arr_time": None,
+        # Connections: what was said about making the next flight.
+        "conn_sent": {},
         # AeroDataBox bookkeeping: seen = it has listed this flight before,
         # missing = it no longer does (renumbered or cancelled?).
         "seen": False, "missing": False, "replacement": None,
@@ -394,52 +480,99 @@ def cancel(topic, ident, path=None):
         return len(trips) - len(keep)
 
 
-def add_journey(out, ret, path=None):
-    """Store a round trip: both flights, linked by a new itinerary id."""
+def add_journey(legs, path=None):
+    """Store a journey's flights (from parse_itinerary), linked by a new itinerary id."""
     iid = secrets.token_hex(4)
-    out.update(itinerary=iid, leg="out")
-    ret.update(itinerary=iid, leg="return")
+    for n, t in enumerate(legs):
+        t.update(itinerary=iid, leg=t.get("leg") or "out", seq=n)
     with TRIPS_LOCK:
-        trips = [t for t in load(path) if not (same_trip(t, out) or same_trip(t, ret))]
-        save(trips + [out, ret], path)
+        trips = [t for t in load(path) if not any(same_trip(t, l) for l in legs)]
+        save(trips + list(legs), path)
+
+
+def attach(anchor, new, connection, path=None):
+    """Store `new` as a further flight of the stored trip `anchor`'s journey:
+    a connection goes right after anchor in the same direction, a return at
+    the end. It takes on anchor's sharing. Returns the stored anchor, or None
+    if it's gone."""
+    with TRIPS_LOCK:
+        trips = load(path)
+        stored = next((t for t in trips if same_trip(t, anchor)), None)
+        if stored is None:
+            return None
+        if not stored.get("itinerary"):
+            stored.update(itinerary=secrets.token_hex(4), leg="out")
+        legs = [t for t in journey(stored, trips) if not same_trip(t, new)]
+        at = next(i for i, t in enumerate(legs) if t is stored) + 1 if connection else len(legs)
+        new.update(itinerary=stored["itinerary"], leg=(stored.get("leg") or "out") if connection else "return",
+                   shared_with=list(stored.get("shared_with") or []))
+        legs.insert(at, new)
+        for n, t in enumerate(legs):
+            t["seq"] = n
+        save([t for t in trips if not same_trip(t, new)] + [new], path)
+        return stored
 
 
 def link_return(out, ret, path=None):
-    """Store `ret` as the flight home of the stored trip `out` (it takes on
-    out's sharing). Returns the stored outbound, or None if it's gone."""
-    with TRIPS_LOCK:
-        trips = load(path)
-        stored = next((t for t in trips if same_trip(t, out)), None)
-        if stored is None:
-            return None
-        iid = stored.get("itinerary") or secrets.token_hex(4)
-        stored.update(itinerary=iid, leg="out")
-        ret.update(itinerary=iid, leg="return", shared_with=list(stored.get("shared_with") or []))
-        save([t for t in trips if not same_trip(t, ret)] + [ret], path)
-        return stored
+    """Store `ret` as the flight home of the stored trip `out`'s journey."""
+    return attach(out, ret, False, path)
 
 
 def sort_key(t):
     return t.get("dep_time") or date_end(t)
 
 
+def leg_order(t):
+    """A flight's place in its journey (older round trips have no seq)."""
+    return t["seq"] if t.get("seq") is not None else int(t.get("leg") == "return")
+
+
 def ordered(trips):
-    """Soonest first, with a round trip's flights kept together: each sorts by
-    its journey's first departure, then its own."""
+    """Soonest first, with a journey's flights kept together in order: each
+    sorts by its journey's first departure, then its place in it."""
     starts = {}
     for t in trips:
         if t.get("itinerary"):
             k = (t.get("topic"), t["itinerary"])
             starts[k] = min(starts.get(k, sort_key(t)), sort_key(t))
-    return sorted(trips, key=lambda t: (starts.get((t.get("topic"), t.get("itinerary")), sort_key(t)), sort_key(t)))
+    return sorted(trips, key=lambda t: (starts.get((t.get("topic"), t.get("itinerary")), sort_key(t)),
+                                        leg_order(t) if t.get("itinerary") else 0, sort_key(t)))
 
 
 def journey(trip, trips):
-    """The flights of trip's round trip in order (outbound first), or [trip]."""
+    """The flights of trip's journey in order (outbound first), or [trip]."""
     if not trip.get("itinerary"):
         return [trip]
     return [t for t in ordered(trips) if t.get("topic") == trip.get("topic")
             and t.get("itinerary") == trip["itinerary"]] or [trip]
+
+
+def neighbour(trip, trips, step):
+    legs = journey(trip, trips)
+    i = next((i for i, t in enumerate(legs) if t is trip or same_trip(t, trip)), None)
+    j = None if i is None else i + step
+    return legs[j] if j is not None and 0 <= j < len(legs) else None
+
+
+def prev_leg(trip, trips):
+    """The flight before this one in its journey (for a return, the last flight out), or None."""
+    return neighbour(trip, trips, -1)
+
+
+def connects_from(trip, trips):
+    """The flight you connect from onto this one, or None."""
+    p = prev_leg(trip, trips)
+    return p if p and p.get("leg") == trip.get("leg") else None
+
+
+def connects_to(trip, trips):
+    """The connecting flight after this one, or None."""
+    n = neighbour(trip, trips, 1)
+    return n if n and n.get("leg") == trip.get("leg") else None
+
+
+def is_round_trip(legs):
+    return any(t.get("leg") == "return" for t in legs)
 
 
 def split_only(text):
@@ -503,7 +636,7 @@ def modify(topic, selector, fn, now, tz_name, path=None):
 
 
 def modify_legs(topic, selector, fn, now, tz_name, path=None):
-    """Like modify(), for actions that cover a whole round trip ("cancel",
+    """Like modify(), for actions that cover a whole journey ("cancel",
     "share"): fn(legs, rest_text) gets every flight of the selected trip's
     journey, or just that one if the text says "only"."""
     with TRIPS_LOCK:
@@ -540,15 +673,48 @@ def plane_name(trip):
     return inb.get("tail") or inb.get("flight") or "your plane"
 
 
-def describe(trip, tz_name, intro=True):
-    """The trip summary sent when it's added, and by "trips"."""
+def short(airport):
+    """KDEN -> DEN, like a departures board."""
+    return airport[1:] if airport and len(airport) == 4 and airport[0] == "K" else airport
+
+
+def arrival_estimate(trip):
+    """When your own flight gets in: landed, live estimate, else AeroDataBox's."""
+    sent = trip.get("conn_sent") or {}
+    return sent.get("landed_at") or sent.get("eta") or trip.get("arr_time")
+
+
+def connection_minutes(prev, nxt):
+    """Minutes between `prev` getting in and the connecting flight `nxt` leaving, or None."""
+    arr, dep = arrival_estimate(prev), nxt.get("dep_time")
+    return round((dep - arr) / 60) if arr and dep else None
+
+
+def describe(trip, tz_name, intro=True, prev=None):
+    """The trip summary sent when it's added, and by "trips". prev: the
+    flight you connect from onto this one."""
     inb = trip.get("inbound") or {}
-    head = f"{'↩ Return ' if trip.get('leg') == 'return' else '🧳 '}{trip['flight']} · {fmt_day(trip, tz_name)}"
+    icon = "🔗 Connection " if prev else "↩ Return " if trip.get("leg") == "return" else "🧳 "
+    head = f"{icon}{trip['flight']} · {fmt_day(trip, tz_name)}"
     if trip.get("dep_time"):
         head += f", departs {fmt_time(trip['dep_time'], tz_name)}"
     if trip.get("dep_airport"):
         head += f" from {trip['dep_airport']}"
+    if trip.get("stops"):
+        head += f", stops in {', '.join(trip['stops'])} on the way to {trip.get('arr_airport')}"
     lines = [head]
+    route = trip.get("route") or []
+    if intro and len(route) > 2:
+        lines.append(f"{trip['flight']} flies {'→'.join(short(a) or '?' for a in route)} that day; I'm following "
+                     f"{short(trip.get('dep_airport'))}→{short(trip.get('arr_airport'))}. Add \"from …\" or "
+                     "\"to …\" if your part is different.")
+    if prev:
+        mins = connection_minutes(prev, trip)
+        where = f" in {prev['arr_airport']}" if prev.get("arr_airport") else ""
+        lines.append(f"Connecting from {prev['flight']}{where}"
+                     + (f": {mins} min after it gets in." if mins is not None and mins >= 0
+                        else f": ⚠️ leaves {-mins} min before {prev['flight']} gets in." if mins is not None
+                        else "."))
     if trip.get("missing"):
         lines.append("⚠️ No longer listed by AeroDataBox (renumbered or cancelled?)")
         rep = trip.get("replacement")
@@ -583,11 +749,13 @@ def describe(trip, tz_name, intro=True):
 def describe_all(trips, tz_name):
     if not trips:
         return "No trips. Send \"inbound UA1234 N38473 dep 4:30pm\" to track the plane flying in for your flight."
-    parts = [f"{n}. " + describe(t, tz_name, intro=False) for n, t in enumerate(trips, 1)]
+    parts = [f"{n}. " + describe(t, tz_name, intro=False, prev=connects_from(t, trips))
+             for n, t in enumerate(trips, 1)]
     tail = ("\n\nChange one with \"change 1 …\" (new flight number, plane, "
             "time, date or airport) or remove it with \"cancel 1\".")
     if any(len(journey(t, trips)) > 1 for t in trips):
-        tail += " Cancelling or sharing a flight covers its return too; add \"only\" for just that one."
+        tail += (" Cancelling or sharing a flight covers the rest of its trip too (connections and return); "
+                 "add \"only\" for just that one.")
     return "\n\n".join(parts) + tail
 
 
@@ -628,9 +796,19 @@ def adb_time(movement, *fields):
     return None
 
 
+def leg_airport(leg, end):
+    """ICAO of a leg's "departure" or "arrival" airport."""
+    return ((leg.get(end) or {}).get("airport") or {}).get("icao")
+
+
+def operated(legs):
+    """A flight number's legs without codeshare duplicates."""
+    return [l for l in legs if not l.get("codeshareStatus") == "IsCodeshared"] or legs
+
+
 def pick_leg(legs, dep_airport):
     """Your leg of a flight number: the one leaving dep_airport, else the first."""
-    legs = [l for l in legs if not l.get("codeshareStatus") == "IsCodeshared"] or legs
+    legs = operated(legs)
     if dep_airport:
         mine = [l for l in legs if ((l.get("departure") or {}).get("airport") or {}).get("icao") == dep_airport]
         if mine:
@@ -639,12 +817,32 @@ def pick_leg(legs, dep_airport):
     return legs[0] if legs else None
 
 
-def pick_inbound(plane_legs, dep_airport, dep_time, flight):
-    """The plane's leg into dep_airport that lands before your departure."""
+def through_route(legs, leg):
+    """The flight number's legs that join up with `leg` into one route
+    (A→B, B→C: a through flight with a stop), in order."""
+    legs = sorted(legs, key=lambda l: adb_time(l.get("departure"), "scheduledTime") or 0)
+    i = next(n for n, l in enumerate(legs) if l is leg)
+    start, end = i, i
+    while start > 0 and leg_airport(legs[start - 1], "arrival") == leg_airport(legs[start], "departure"):
+        start -= 1
+    while end + 1 < len(legs) and leg_airport(legs[end], "arrival") == leg_airport(legs[end + 1], "departure"):
+        end += 1
+    return legs[start:end + 1]
+
+
+def ride(route, leg, get_off):
+    """Your part of a through flight: from `leg` to get_off, else to the end."""
+    part = route[route.index(leg):]
+    off = next((n for n, l in enumerate(part) if leg_airport(l, "arrival") == get_off), None)
+    return part[:off + 1] if get_off and off is not None else part
+
+
+def pick_inbound(plane_legs, dep_airport, dep_time):
+    """The plane's leg into dep_airport that lands before your departure. On a
+    through flight you board at the stop, that's your own flight number's
+    first leg."""
     best, best_arr = None, None
     for l in plane_legs:
-        if commands.normalize_tail(l.get("number") or "") == commands.normalize_tail(flight):
-            continue
         arr = l.get("arrival") or {}
         if (arr.get("airport") or {}).get("icao") != dep_airport:
             continue
@@ -669,7 +867,8 @@ def resolve(trip, key, ua, full=True, sleep=time.sleep, get=adb_get):
     common = {"withAircraftImage": "false", "withLocation": "false"}
     legs = get(key, f"/flights/number/{urllib.parse.quote(trip['flight'])}/{trip['date']}",
                {**common, "dateLocalRole": "Departure"}, ua)
-    leg = pick_leg(legs if isinstance(legs, list) else [], trip.get("dep_airport"))
+    legs = operated(legs if isinstance(legs, list) else [])
+    leg = pick_leg(legs, trip.get("dep_airport"))
     if not leg:
         if trip.get("seen") and not trip.get("missing"):
             trip["missing"] = True
@@ -681,7 +880,13 @@ def resolve(trip, key, ua, full=True, sleep=time.sleep, get=adb_get):
     trip["seen"] = True
     dep = leg.get("departure") or {}
     trip["dep_airport"] = (dep.get("airport") or {}).get("icao") or trip.get("dep_airport")
-    trip["arr_airport"] = ((leg.get("arrival") or {}).get("airport") or {}).get("icao") or trip.get("arr_airport")
+    route = through_route(legs, leg)
+    mine = ride(route, leg, trip.get("get_off"))
+    trip["arr_airport"] = leg_airport(mine[-1], "arrival") or trip.get("arr_airport")
+    trip["arr_time"] = adb_time(mine[-1].get("arrival"), "revisedTime", "predictedTime", "scheduledTime")
+    trip["stops"] = [a for a in (leg_airport(l, "arrival") for l in mine[:-1]) if a]
+    trip["route"] = [leg_airport(route[0], "departure")] + [leg_airport(l, "arrival") for l in route] \
+        if len(route) > 1 else []
     trip["sched_dep_local"] = (dep.get("scheduledTime") or {}).get("local") or trip.get("sched_dep_local")
     new_dep = adb_time(dep, "revisedTime", "predictedTime", "scheduledTime")
     if new_dep:
@@ -696,7 +901,7 @@ def resolve(trip, key, ua, full=True, sleep=time.sleep, get=adb_get):
     sleep(1.1)  # free tier allows 1 request per second
     plane_legs = get(key, f"/flights/reg/{reg}/{trip['date']}", {**common, "dateLocalRole": "Both"}, ua)
     inbound = pick_inbound(plane_legs if isinstance(plane_legs, list) else [],
-                           trip["dep_airport"], trip.get("dep_time"), trip["flight"])
+                           trip["dep_airport"], trip.get("dep_time"))
     info = {"tail": reg, "flight": None, "callsign": None, "origin": None, "arr_time": None}
     if inbound:
         number = flights.parse_flight(inbound.get("number") or "")
@@ -735,7 +940,7 @@ def find_replacement(trip, key, ua, get=adb_get):
         number = flights.parse_flight(f.get("number") or "")
         if not number or number[0] == trip["flight"] or number[1][:3] != airline:
             continue
-        if ((f.get("arrival") or {}).get("airport") or {}).get("icao") != trip["arr_airport"]:
+        if ((f.get("arrival") or {}).get("airport") or {}).get("icao") != (trip.get("stops") or [trip["arr_airport"]])[0]:
             continue
         when = adb_time(f.get("departure") or f.get("movement"), "scheduledTime")
         if when is None:
@@ -819,12 +1024,13 @@ OWN_BEFORE_H = 3    # for shared trips, follow your own flight from this long be
 OWN_AFTER_H = 20    # ...until it lands, or this long after departure
 
 
-def own_live(trip, now):
-    """Is it time to follow your own flight for the people you shared it with?
+def own_live(trip, now, connecting=False):
+    """Is it time to follow your own flight, for the people you shared it with
+    or because you have a connection to make after it?
 
     Only around departure: the same flight number flies every day, so a
     flight shared a month ahead must not alert on the other 29 days."""
-    if not trip.get("shared_with") or (trip.get("own_sent") or {}).get("landed"):
+    if not (trip.get("shared_with") or connecting) or (trip.get("own_sent") or {}).get("landed"):
         return False
     if trip.get("dep_time"):
         return trip["dep_time"] - OWN_BEFORE_H * 3600 <= now <= trip["dep_time"] + OWN_AFTER_H * 3600
@@ -841,18 +1047,124 @@ def share_with(trip, topics, own_topic):
     return added
 
 
+def near(ac, airport, airports, nm):
+    """Is the aircraft position `ac` within nm of airport? False when unknown."""
+    c = airports.coords.get(airport or "")
+    if not c or not ac or ac.get("lat") is None or ac.get("lon") is None:
+        return False
+    return haversine_nm(ac["lat"], ac["lon"], c[0], c[1]) <= nm
+
+
+def boards_midway(trip):
+    """A through flight you board at one of its stops: its earlier leg's takeoff isn't yours."""
+    route = trip.get("route") or []
+    return bool(route and trip.get("dep_airport") and route[0] != trip["dep_airport"])
+
+
+def own_event(trip, event, ac, airports):
+    """Turn observe()'s event for your own flight into "departed", "landed" or
+    None, recorded in trip["own_sent"] so each happens once. ac: this cycle's
+    fix, or the last one. On a through flight, only the takeoff from where you
+    board counts, and a landing at a stop on the way isn't your landing."""
+    sent = trip.setdefault("own_sent", {})
+    if event in ("departed", "airborne") and not sent.get("departed"):
+        if boards_midway(trip) and not near(ac, trip["dep_airport"], airports, STOP_NM):
+            return None
+        sent["departed"] = True
+        return "departed"
+    if event in ("landed", "lost_low") and sent.get("departed") and not sent.get("landed"):
+        if any(near(ac, stop, airports, STOP_NM) for stop in trip.get("stops") or []):
+            return None
+        sent["landed"] = True
+        return "landed"
+    return None
+
+
+def connection_step(trip, nxt, fix, kind, now, airports, tz_name):
+    """You're on `trip` and connect to `nxt`: from this cycle's fix of your own
+    flight (kind = own_event()'s result), say how long you'll have to make it.
+    Only a later arrival is worth another message. Returns [(title, message, priority)]."""
+    sent = trip.setdefault("conn_sent", {})
+    if sent.get("landed_at") or not (trip.get("own_sent") or {}).get("departed"):
+        return []
+    flight, where, dep = trip["flight"], trip.get("arr_airport"), nxt.get("dep_time")
+    there = f" in {where}" if where else ""
+
+    def left(arr):
+        mins = round((dep - arr) / 60)
+        if mins < 0:
+            return f"{nxt['flight']} is due to leave {-mins} min before that."
+        return f"That leaves {mins} min to make {nxt['flight']} (departs {fmt_time(dep, tz_name)})."
+
+    if kind == "landed":
+        sent["landed_at"] = now
+        if not dep:
+            return [(f"🛬 {flight} landed{there}", f"Your connection is {nxt['flight']}.", 3)]
+        mins = round((dep - now) / 60)
+        other = f" from {nxt['dep_airport']}" if nxt.get("dep_airport") and nxt["dep_airport"] != where else ""
+        return [(f"🛬 {flight} landed{there}",
+                 f"{nxt['flight']} departs{other} at {fmt_time(dep, tz_name)}, "
+                 + (f"{mins} min from now." if mins >= 0 else f"{-mins} min ago by its schedule."),
+                 4 if mins < CONNECT_TIGHT_MIN else 3)]
+    target = airports.coords.get(where or "")
+    if not fix or fix.get("alt_baro") == "ground" or not target or not dep:
+        return []
+    arr = estimate_arrival(fix, target[:2], now)
+    if not arr:
+        return []
+    spare = (dep - arr) / 60
+    due = f"{flight} is due{there} around {fmt_time(arr, tz_name)}. " + left(arr)
+    if not sent.get("eta"):
+        sent.update(eta=arr, tight=spare < CONNECT_TIGHT_MIN, miss=spare < CONNECT_MISS_MIN)
+        return [(f"✈️ {flight} is on its way" + (f" to {where}" if where else ""), due, 4 if sent["tight"] else 3)]
+    if spare < CONNECT_MISS_MIN and not sent.get("miss"):
+        sent.update(eta=arr, tight=True, miss=True)
+        return [(f"⚠️ {nxt['flight']}: connection at risk", due, 4)]
+    if spare < CONNECT_TIGHT_MIN and not sent.get("tight"):
+        sent.update(eta=arr, tight=True)
+        return [(f"⏳ {nxt['flight']}: tight connection", due, 4)]
+    if arr - sent["eta"] >= ETA_SHIFT_MIN * 60:
+        sent["eta"] = arr
+        return [(f"🧳 {flight}: running later", due, 3)]
+    if sent["eta"] - arr >= ETA_SHIFT_MIN * 60:
+        sent["eta"] = arr
+    return []
+
+
+def connection_notes(prev, nxt, tz_name):
+    """Before you fly: warn when AeroDataBox's times leave a tight (or no)
+    connection from prev to nxt, and again if it shrinks by another 15 min."""
+    arr, dep = prev.get("arr_time"), nxt.get("dep_time")
+    if not arr or not dep or (prev.get("own_sent") or {}).get("departed"):
+        return []
+    spare = round((dep - arr) / 60)
+    sent = prev.setdefault("conn_sent", {})
+    last = sent.get("sched")
+    if spare >= CONNECT_TIGHT_MIN or (last is not None and last - spare < ETA_SHIFT_MIN):
+        return []
+    sent["sched"] = spare
+    where = f" in {prev['arr_airport']}" if prev.get("arr_airport") else ""
+    times = (f"{prev['flight']} is due{where} at {fmt_time(arr, tz_name)} and {nxt['flight']} "
+             f"leaves at {fmt_time(dep, tz_name)}")
+    if spare < 0:
+        return [(f"⚠️ {nxt['flight']}: connection doesn't work", times + ". Check with the airline.", 4)]
+    return [(f"⏳ Tight connection{where}", f"{times}: {spare} min to change planes.", 4)]
+
+
 def share_announcement(legs, owner, tz_name):
-    """What a watcher gets when a trip (one flight, or both of a round trip) is
+    """What a watcher gets when a trip (one flight, or a whole journey) is
     shared with them: one note, however many flights."""
     lines = []
-    for trip in legs:
+    for n, trip in enumerate(legs):
         when = f"departs {fmt_time(trip['dep_time'], tz_name)}" if trip.get("dep_time") else ""
         where = f"from {trip['dep_airport']}" if trip.get("dep_airport") else ""
         detail = " ".join(x for x in (when, where) if x)
-        lines.append(f"{'Return: ' if trip.get('leg') == 'return' and len(legs) > 1 else ''}"
-                     f"{trip['flight']} · {fmt_day(trip, tz_name)}{', ' + detail if detail else ''}.")
+        first_back = trip.get("leg") == "return" and (n == 0 or legs[n - 1].get("leg") != "return")
+        label = "Return: " if first_back and len(legs) > 1 else "Then: " if n else ""
+        lines.append(f"{label}{trip['flight']} · {fmt_day(trip, tz_name)}{', ' + detail if detail else ''}.")
     if len(legs) > 1:
-        return (f"📣 {owner} shared a round trip with you", "\n".join(lines)
+        kind = "a round trip" if is_round_trip(legs) else "a trip"
+        return (f"📣 {owner} shared {kind} with you", "\n".join(lines)
                 + "\nYou'll get an alert when each flight departs and when it lands.", 3)
     return (f"📣 {owner} shared a flight with you",
             lines[0] + "\nYou'll get an alert when it departs and when it lands.", 3)
@@ -969,8 +1281,11 @@ def step(trip, fix, now, airports, tz_name, route_lookup):
                             f"{plane} is on the ground at {trip['dep_airport']}.", 3))
         return out
 
-    # Airborne. Is this the leg into your airport, or an earlier one?
-    dest = route_lookup(trip, callsign) if callsign else None
+    # Airborne. Is this the leg into your airport, or an earlier one? (On a
+    # through flight boarding at the stop, the plane is your own flight number,
+    # whose usual route may well end somewhere else.)
+    through = (trip.get("inbound") or {}).get("callsign") == trip.get("callsign")
+    dest = route_lookup(trip, callsign) if callsign and not through else None
     if dest and not trip.get("dep_airport"):
         trip["dep_airport"] = dest
         target = airports.coords.get(dest)
