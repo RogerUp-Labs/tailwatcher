@@ -15,7 +15,7 @@ Nothing else is needed: alerts go through the public ntfy.sh service by default,
 
 Each watcher has their own notification topic, a long random name that TailWatcher picks. Open **Connect phone** on that watcher. Distance doesn't matter: someone in another state gets alerts the same way.
 
-**Send an invite link** (best when they're not with you): type your name, pick how long the link should work (7 days by default), tap **Create invite link**, then **Send invite** to text it, or send it by iMessage, Signal or email. It's a normal web link, so it's tappable in any messaging app. It opens a page that walks them through installing ntfy and subscribing in two taps. Active invites are listed in the dialog, where **Cancel** stops one. Invite links need TailWatcher to have a public address in StartOS (for example through StartTunnel); without one, they only work on your home network.
+**Send an invite link** (best when they're not with you): type your name, pick how long the link should work (7 days by default), tap **Create invite link**, then **Send invite** to text it, or send it by iMessage, Signal or email. It's a normal web link, so it's tappable in any messaging app. It opens a page that walks them through installing ntfy and subscribing in two taps. Active invites are listed in the dialog, where **Cancel** stops one. Invite links need TailWatcher to have a public address (in StartOS, for example through StartTunnel; with Docker, see **Running without a Start9**); without one, they only work on your home network.
 
 **With their phone in hand**, use the steps under the invite box:
 
@@ -150,6 +150,31 @@ Add and change things right on the page: **+ Add trip**, **+ Add watcher**, **+ 
 - **ADS-B feed** and **Check every**: adsb.fi is the default. All planes are checked together, one request per cycle.
 - **Time zone**, **map buttons**, **text commands**, and **Require a password for this page** (get it from **Actions → Show Web UI Password**).
 
+## Running without a Start9
+
+TailWatcher also runs as an ordinary Docker container: on a Synology, Unraid or TrueNAS NAS, a Raspberry Pi, or any computer with Docker. It's the same app, with the same dashboard and alerts.
+
+1. Get **docker-compose.yml** from the `docker` folder of github.com/RogerUp-Labs/tailwatcher.
+2. Start it. On a Synology: **Container Manager → Project → Create**, pick a folder (for example `/docker/tailwatcher`), choose **Upload docker-compose.yml**, and finish. Elsewhere: `docker compose up -d` in the folder with the file.
+3. Find the dashboard password in the container's log (Container Manager → Container → tailwatcher → **Log**), then open `http://<your NAS>:8080` with any username and that password.
+4. Carry on with **Getting started**. Alerts use ntfy.sh unless you change it.
+
+Settings that StartOS would fill in are set in docker-compose.yml instead:
+
+| Setting | What it's for |
+|---|---|
+| `NTFY_URL` | Your own ntfy, as TailWatcher reaches it: `http://<your NAS>:<port>`, or `http://ntfy:80` for the ntfy service in the same file. Then pick **This server's NTFY** in **⚙ Settings**. |
+| `NTFY_PHONE_URL` | The https address phones use for that ntfy, so **Connect phone** gives a one-tap link. |
+| `TAILWATCHER_PUBLIC_URL` | TailWatcher's own https address, if you put it behind a reverse proxy. Invite links need it. |
+| `TAILWATCHER_PASSWORD` | Your own dashboard password instead of the generated one. |
+
+Good to know:
+
+- Everything TailWatcher keeps (watchers, trips, history) is in the `data` folder next to docker-compose.yml. Back it up; there is no StartOS backup.
+- The dashboard password is on by default with Docker, since a NAS port can be reachable from more places than a Start9's. You can turn it off in **⚙ Settings**.
+- An ntfy server that allows anonymous publishing needs no token. If yours requires logins, either paste a token in **⚙ Settings** or use **Set up NTFY for me** with its admin password.
+- To update: Container Manager → Project → tailwatcher → **Action → Build** (or `docker compose pull && docker compose up -d`).
+
 ## For people getting alerts
 
 *A short version to send to the people who get alerts. The Copy button in Help copies it.*
@@ -168,7 +193,7 @@ To stop all alerts, unsubscribe from the topic in the ntfy app. On Android, set 
 
 ### I'm not getting any alerts
 
-- Run **Actions → Send Test Notification** in StartOS. If it reports a problem, the message says what to fix.
+- Run **Actions → Send Test Notification** in StartOS (with Docker: `docker exec tailwatcher python /app/tailwatcher.py test`). If it reports a problem, the message says what to fix.
 - Check the phone is subscribed to the right topic: open **Connect phone** for that person and compare the topic with the one in their ntfy app.
 - On Android, set the ntfy app's battery use to **Unrestricted** (Settings → Apps → ntfy → Battery).
 - Look at **System** on the dashboard: "needs attention" there explains what's wrong.
@@ -214,7 +239,7 @@ Check the key in **⚙ Settings** (paste it again to replace it). The free plan 
 
 ### I lost a password
 
-- **The dashboard password:** StartOS → TailWatcher → **Actions → Show Web UI Password** (or **Reset Web UI Password**).
+- **The dashboard password:** StartOS → TailWatcher → **Actions → Show Web UI Password** (or **Reset Web UI Password**). With Docker, it's in the container's log, or run `docker exec tailwatcher python /app/tailwatcher.py password` (`reset-password` makes a new one).
 - **NTFY's admin password:** NTFY → **Actions → Reset User Password** → admin.
 
 ## Good to know

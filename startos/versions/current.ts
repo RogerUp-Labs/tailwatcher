@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.18.0:0',
+  version: '0.19.0:0',
   releaseNotes: {
     en_US:
-      'Import a trip: tap Import next to + Add trip and paste your booking confirmation, or choose a saved email (.eml) or calendar file (.ics). TailWatcher finds the flights, connections and flight home and fills in the Add trip form for you to check before adding. It reads the flight details airlines and booking sites hide in confirmation emails, calendar events from Add to calendar, TripIt or Kayak, and plain text. PDFs and screenshots can\'t be read yet: copy their text and paste it instead. Reading a confirmation uses none of your AeroDataBox requests.',
+      'TailWatcher can now also run without a Start9, as an ordinary Docker container on a Synology, Unraid or TrueNAS NAS or any computer with Docker, with alerts through ntfy.sh or an ntfy server you run yourself. See Running without a Start9 in the instructions. Nothing changes on StartOS, apart from a few hints that now point at Settings in the Web UI.',
   },
   migrations: {
     up: async () => {},

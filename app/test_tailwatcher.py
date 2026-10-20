@@ -198,6 +198,54 @@ class NtfyServerTest(unittest.TestCase):
         self.assertEqual(cfg({"ntfyServer": "public", "ntfyToken": "tk"})["ntfy_server"], "public")
 
 
+class DockerTest(unittest.TestCase):
+    """A plain Docker install has no StartOS init or Actions menu."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(setattr, tw, "PLATFORM", tw.PLATFORM)
+
+    def path(self, name, data=None):
+        import json, os
+        p = os.path.join(self.dir, name)
+        if data is not None:
+            with open(p, "w") as f:
+                json.dump(data, f)
+        return p
+
+    def test_password_defaults_on_only_for_docker(self):
+        missing, chosen = self.path("none.json"), self.path("c.json", {"webPassword": False})
+        tw.PLATFORM = "startos"
+        self.assertFalse(tw.web_password_required(missing))
+        self.assertFalse(tw.load_config(missing)["web_password"])
+        tw.PLATFORM = "docker"
+        self.assertTrue(tw.web_password_required(missing))
+        self.assertTrue(tw.load_config(missing)["web_password"])
+        self.assertFalse(tw.web_password_required(chosen))   # turned off in Settings stays off
+        self.assertFalse(tw.load_config(chosen)["web_password"])
+
+    def test_ensure_password(self):
+        import web
+        p = self.path("webui.json")
+        made = web.ensure_password(p)
+        self.assertEqual(len(made), 20)
+        self.assertEqual(web.ensure_password(p), made)                   # kept across restarts
+        self.assertEqual(web.ensure_password(p, " hunter22 "), "hunter22")  # TAILWATCHER_PASSWORD wins
+        self.assertEqual(web.read_password(p), "hunter22")
+        self.assertNotEqual(web.new_password(p), "hunter22")
+
+    def test_send_test(self):
+        from unittest import mock
+        cfg = {"ntfy_server": "custom", "ntfy_custom_url": "http://ntfy:80", "ntfy_token": "tk_a",
+               "watchers": [{"name": "Sam", "topic": "tw-sam"}]}
+        with mock.patch.object(tw, "publish") as pub:
+            self.assertEqual(tw.send_test(cfg), [("Sam", "tw-sam", "✓ sent")])
+        url, token, payload = pub.call_args.args
+        self.assertEqual((url, token, payload["topic"]), ("http://ntfy:80", "tk_a", "tw-sam"))
+        self.assertIn("test_tube", payload["tags"])                       # ignored as our own by commands
+
+
 class BatchPollTest(unittest.TestCase):
     def test_one_request_per_25_keys(self):
         urls = []

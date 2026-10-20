@@ -34,7 +34,12 @@ export const main = sdk.setupMain(async ({ effects }) => {
     subcontainer,
     exec: {
       command: ['python', '/app/tailwatcher.py'],
-      env: { NTFY_URL: ntfy, NTFY_PHONE_URL: phone, TAILWATCHER_PUBLIC_URL: publicUrl },
+      env: {
+        TW_PLATFORM: 'startos',
+        NTFY_URL: ntfy,
+        NTFY_PHONE_URL: phone,
+        TAILWATCHER_PUBLIC_URL: publicUrl,
+      },
     },
     ready: {
       display: 'Watcher',

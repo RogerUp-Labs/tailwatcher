@@ -4,7 +4,9 @@ No login by default: it's an admin panel for a household server, reachable
 only where StartOS exposes it. With "Require Web UI password" on in
 Configure, everything except /health (the StartOS health check) needs the
 password from /data/webui.json via HTTP Basic auth (any username); StartOS
-writes it at install and "Show Web UI Password" displays it.
+writes it at install and "Show Web UI Password" displays it. A plain Docker
+install has no StartOS init, so ensure_password() makes it on first start
+(or takes $TAILWATCHER_PASSWORD).
 
 Edits are JSON POSTs to /api/... carrying an "X-TailWatcher: 1" header, and
 an Origin, if sent, must match the Host. Browsers won't let another website
@@ -16,6 +18,7 @@ import base64
 import hmac
 import json
 import os
+import secrets
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,6 +37,34 @@ def read_password(path=PASSWORD_PATH):
             return (json.load(f).get("password") or "").strip() or None
     except (OSError, ValueError, AttributeError):
         return None
+
+
+# Same alphabet as newPassword() in startos/fileModels/webui.json.ts (no l, I, O, 0, 1).
+PASSWORD_CHARS = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def write_password(password, path=PASSWORD_PATH):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"password": password}, f)
+    os.replace(tmp, path)
+
+
+def new_password(path=PASSWORD_PATH):
+    password = "".join(secrets.choice(PASSWORD_CHARS) for _ in range(20))
+    write_password(password, path)
+    return password
+
+
+def ensure_password(path=PASSWORD_PATH, wanted=None):
+    """The dashboard password, made if there isn't one. `wanted` (from
+    $TAILWATCHER_PASSWORD) replaces whatever is stored."""
+    wanted = (wanted or "").strip()
+    if wanted:
+        if read_password(path) != wanted:
+            write_password(wanted, path)
+        return wanted
+    return read_password(path) or new_password(path)
 
 
 def authorized(header, password):
