@@ -47,7 +47,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.19.0"
+VERSION = "0.19.1"
 # "startos" (main.ts sets it) or "docker" (the Dockerfile's default): only
 # changes setup hints and whether the dashboard password starts on.
 PLATFORM = os.environ.get("TW_PLATFORM", "startos")
@@ -807,9 +807,8 @@ def run():
             return True
         except urllib.error.HTTPError as e:
             if e.code != 429 and e.code < 500:
-                topic_errors[topic] = (
-                    f"NTFY refused topic {topic} (HTTP {e.code}); check the "
-                    "publisher token has access to it")
+                topic_errors[topic] = f"NTFY refused topic {topic} (HTTP {e.code})" + (
+                    "; " + commands.access_hint(topic) if e.code in (401, 403) else "")
                 log.error(topic_errors[topic])
                 record("refused")
                 return True  # retrying won't help; don't queue
@@ -1335,7 +1334,8 @@ def send_test(cfg):
                 "actions": [{"action": "view", "label": "ADS-B Exchange", "url": link}]})
             out.append((w["name"], w["topic"], "✓ sent"))
         except urllib.error.HTTPError as e:
-            hint = (": the token has no access to this topic" if e.code in (401, 403) else "")
+            hint = (": the token has no access to this topic; " + commands.access_hint(w["topic"])
+                    if e.code in (401, 403) else "")
             out.append((w["name"], w["topic"], f"✗ refused (HTTP {e.code}){hint}"))
         except (urllib.error.URLError, OSError) as e:
             out.append((w["name"], w["topic"], f"✗ could not reach {url}: {e}"))

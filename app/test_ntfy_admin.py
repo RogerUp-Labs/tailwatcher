@@ -35,6 +35,9 @@ class SetupTest(unittest.TestCase):
         grants = [c[2] for c in ntfy.calls if c[1] == "/v1/users/access" and c[0] == "PUT"]
         self.assertIn({"username": "tailwatcher", "topic": "tw-*", "permission": "read-write"}, grants)
         self.assertIn({"username": "*", "topic": "tw-*", "permission": "read-write"}, grants)
+        # pre-0.12 tailwatcher_… topics: TailWatcher's own user only, never anonymous
+        self.assertIn({"username": "tailwatcher", "topic": "tailwatcher*", "permission": "read-write"}, grants)
+        self.assertNotIn({"username": "*", "topic": "tailwatcher*", "permission": "read-write"}, grants)
         self.assertIn("your admin password was not stored", steps[-1])
 
     def test_rerun_resets_user_and_login_mode_closes_anonymous(self):

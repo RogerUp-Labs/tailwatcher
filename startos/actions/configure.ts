@@ -173,7 +173,7 @@ const inputSpec = InputSpec.of({
   textCommands: Value.toggle({
     name: 'Text Commands',
     description:
-      'Let each watcher change their own list by typing in their NTFY topic: send a tail or flight number to add it ("UA1234 for 2 days" to have it expire), "remove N12345" to drop it, "list" to see it. Requires the NTFY Access Token above to belong to a user with Read-Write on tailwatcher*, and each watcher\'s user Read-Write on their topic.',
+      'Let each watcher change their own list by typing in their NTFY topic: send a tail or flight number to add it ("UA1234 for 2 days" to have it expire), "remove N12345" to drop it, "list" to see it. With this server\'s NTFY, "Set up NTFY for me" in the Web UI\'s ⚙ Settings grants what this needs (the token\'s user needs Read-Write on tw-*).',
     default: true,
   }),
   timeZone: Value.select({

@@ -202,6 +202,15 @@ class ApplyTest(unittest.TestCase):
         self.assertEqual([a["tail"] for a in w["aircraft"]], ["N1", "N2"])
 
 
+class AccessHintTest(unittest.TestCase):
+    def test_pattern_matches_topic(self):
+        # A 403 on a new tw-… topic used to point people at tailwatcher*
+        self.assertIn("Read-Write on tw-*", c.access_hint("tw-dad-h5nenad6cp8g5jwksg9t"))
+        self.assertIn("Read-Write on tailwatcher*", c.access_hint("tailwatcher_dad"))
+        self.assertIn("Read-Write on family", c.access_hint("family"))
+        self.assertIn("Set up NTFY for me", c.access_hint("tw-dad-x"))
+
+
 class ListenerFilterTest(unittest.TestCase):
     def test_own_messages_and_non_messages_are_ignored(self):
         got = []
