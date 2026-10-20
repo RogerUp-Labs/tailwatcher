@@ -85,9 +85,11 @@ a:hover { text-decoration: underline; }
   padding: 6px 10px; border-radius: 999px; font-size: 13px;
 }
 .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42vw; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: #4cc983; flex: none; box-shadow: 0 0 0 3px rgba(76,201,131,.25); }
-.dot.bad { background: #ff6b63; box-shadow: 0 0 0 3px rgba(255,107,99,.25); }
-.dot.wait { background: #ffb547; box-shadow: 0 0 0 3px rgba(255,181,71,.25); }
+/* The halo is a border, not a box-shadow, so it can't drift off-centre from the
+   dot at fractional pixel positions (Safari draws small box-shadows offset). */
+.dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: #4cc983 padding-box; border: 3px solid rgba(76,201,131,.25); margin: -3px; }
+.dot.bad { background-color: #ff6b63; border-color: rgba(255,107,99,.25); }
+.dot.wait { background-color: #ffb547; border-color: rgba(255,181,71,.25); }
 
 /* ---------- layout ---------- */
 main { max-width: 1180px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 32px); }
@@ -360,7 +362,9 @@ dialog.help { width: min(720px, calc(100vw - 24px)); }
 .flap-sub code { font-family: var(--mono); color: #ffd23f; }
 .flap-group { font-family: var(--board-font); letter-spacing: 1.5px; text-transform: uppercase; font-size: 13px; color: var(--text-2); margin: 10px 2px 8px; display: flex; gap: 8px; align-items: baseline; }
 .flap-group:first-child { margin-top: 0; }
-.flap-group small { font-family: var(--mono); letter-spacing: 0; text-transform: none; color: var(--text-3); font-size: 11px; }
+.flap-group { flex-wrap: wrap; row-gap: 4px; }
+.flap-group small { font-family: var(--mono); letter-spacing: 0; text-transform: none; color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; min-width: 0; }
+.flap-group .linkbtn { white-space: nowrap; }
 .flap-group .tag { font-family: system-ui, sans-serif; letter-spacing: 0; }
 .only-wide { display: flex; }
 .only-narrow { display: none; }
@@ -375,6 +379,11 @@ dialog.help { width: min(720px, calc(100vw - 24px)); }
   .cols-trip { grid-template-columns: auto auto auto; }
   .only-wide { display: none; }
   .only-narrow { display: inline; }
+}
+/* Small phones (360 px): a trip row is 21 tiles, so shrink them to fit. */
+@media (max-width: 380px) {
+  .theme-board { --tile-w: 12px; --tile-h: 20px; --tile-font: 11.5px; }
+  .flap-head, .flap-row { gap: 6px; }
 }
 </style>
 </head>
