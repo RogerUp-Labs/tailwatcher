@@ -136,7 +136,7 @@ The Web UI shows everyone's watchers and trips in one place:
 - **Activity:** recent alerts, replies, text commands and edits
 - **System:** whether notifications, text commands and trip lookups are working
 
-Add and change things right on the page: **+ Add trip**, **+ Add watcher**, **+ Aircraft**, and **Edit** on any trip, watcher or aircraft. The switch in the top corner picks a look, **Modern** or **Board** (an airport departures board with split-flap tiles), and each browser remembers it. **? Help** opens this guide.
+Add and change things right on the page: **+ Add trip**, **+ Add watcher**, **+ Aircraft**, and **Edit** on any trip, watcher or aircraft. The switch in the top corner picks a look, **Modern** or **Board** (an airport departures board with split-flap tiles), and each browser remembers it. **? Help** opens this guide as a full page, with the topics listed down the side (under **Contents** on a phone). Back closes it, and **Open in new tab** keeps it open next to the dashboard.
 
 ## Settings and where alerts go
 

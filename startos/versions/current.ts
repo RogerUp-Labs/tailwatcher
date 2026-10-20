@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.19.1:0',
+  version: '0.20.2:0',
   releaseNotes: {
     en_US:
-      'Fixed a misleading "can\'t read topic (HTTP 403)" message for new watchers on this server\'s NTFY: it told you to grant access on tailwatcher*, but watcher topics now start with tw-. The message now names the right permission and points to "Set up NTFY for me" in ⚙ Settings, which now also covers topics made by older versions.',
+      'Help is now a full page instead of a small pop-up: a list of topics down the side (under Contents on a phone), search, and an Open in new tab link. The browser\'s Back button closes it, and a Help address like …/#help/importing-a-trip opens straight to that topic, so you can bookmark or send it.',
   },
   migrations: {
     up: async () => {},
