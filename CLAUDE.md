@@ -27,6 +27,7 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 - `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.18.0`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
 - Packing needs a git commit (it records the hash) and the `assets/` dir.
 - `make install` sideloads to the host in `~/.startos/config.yaml`.
+- Releases: `.github/workflows/release.yml` tests and builds x86_64 + aarch64 (native arm runner) on every PR, and publishes a GitHub release only when a `vX.Y.Z` tag is pushed (the tag must match `current.ts`). Versions still bump per feature for local sideload testing; Sam tags only when a batch is worth publishing, and `.github/release_notes.py` puts every version's notes since the previous tag in the release body. CI pins start-cli `START_CLI_VERSION` (0.4.0-beta.9, same as the build machine; beta.10+ moved the signing key) and signs with the `DEV_KEY` secret (`~/.startos/developer.key.pem`); tag builds fail without it.
 
 ## Gotchas
 
