@@ -80,14 +80,14 @@ Before a flight, the plane you'll fly on is usually still finishing an earlier f
 - **Without an AeroDataBox key**, say which plane it is. Your airline app usually shows it under "Where's my plane?": `inbound UA1234 N38473 dep 4:30pm` (or the inbound flight number instead of the tail). Add `tomorrow`, a date `10/20` and `from IAD` if needed.
 - **With an AeroDataBox key**, `inbound UA1234 11/14` is enough. TailWatcher looks up your departure time, finds the assigned plane once the airline picks one, and tells you if the plane or your time changes. It checks weekly when the trip is far off, daily in the last two weeks, and four times on the last day: about 20 of the free plan's 400 monthly requests for a trip booked a month ahead.
 
-**Round trips.** Going and coming back? Enter both flights at once: fill in **Return flight** on **+ Add trip**, or text `inbound UA1234 11/14 return UA5678 11/21`. Without an AeroDataBox key, give each flight its plane and time: `inbound UA1234 N38473 11/14 dep 4:30pm return UA5678 N12345 11/21 dep 6pm`. Already added your flight out? Text `return 1 UA5678 11/21` to add the flight home to trip 1.
+**Round trips.** Going and coming back? Enter both flights at once: open **Return flight** on **+ Add trip** and fill it in, or text `inbound UA1234 11/14 return UA5678 11/21`. Without an AeroDataBox key, give each flight its plane and time: `inbound UA1234 N38473 11/14 dep 4:30pm return UA5678 N12345 11/21 dep 6pm`. Already added your flight out? Text `return 1 UA5678 11/21` to add the flight home to trip 1.
 
 - The flight home leaves from where your flight out lands. Add `from LAS` after the return flight if it doesn't.
 - Times you type are local to the airport the flight leaves from: `dep 6pm from LAS` means 6pm in Las Vegas. If TailWatcher doesn't know that airport yet (no AeroDataBox key and no `from`), it reads the time in its own time zone (**⚙ Settings**), so add `from LAS` to a return that leaves from another time zone. Messages and the dashboard always show times in TailWatcher's time zone.
 - Both flights are listed together and numbered one after the other. `change` edits one flight; `share` and `cancel` cover both, unless you add `only` (`cancel 2 only`).
 - With an AeroDataBox key, each flight is checked on its own schedule, so a round trip booked a month ahead uses about 40 of the 400 free monthly requests.
 
-**Connecting flights.** Changing planes on the way? Add the next flight with `then`: `inbound UA1234 11/14 then UA567`, or fill in **Connecting flight** on **+ Add trip**. It works on the way back too: `… return UA5678 11/21 then UA910`. Already added the first flight? Text `connect 1 UA567`. Up to 4 flights in a row each way.
+**Connecting flights.** Changing planes on the way? Add the next flight with `then`: `inbound UA1234 11/14 then UA567`, or tap **+ Add connection** on **+ Add trip** once for each flight after the first. It works on the way back too: **+ Add return connection**, or `… return UA5678 11/21 then UA910`. Already added the first flight? Text `connect 1 UA567`, or **Edit** the last flight and add it there. Up to 8 flights in a row each way.
 
 - A connection is on the same day as the flight before it and leaves from where that flight lands. A time earlier than the first flight's means the next morning. Add a date or `from DEN` if not.
 - Without an AeroDataBox key, give the connection its own time and plane: `inbound UA1234 N38473 dep 8am from IAD then UA567 N12345 dep 1:10pm from DEN`. Add `from` when the connection leaves from another time zone, so the time is read right.
@@ -113,7 +113,7 @@ Instead of typing flight numbers, tap **Import** next to **+ Add trip** and past
 
 - **PDFs, screenshots and Word files can't be read.** Open the file, select all the text, copy it and paste it into the box instead.
 - **Saving an email as .eml:** in Gmail on a computer, open the email, then ⋮ → **Download message**. In Outlook, **File → Save As**. In Apple Mail, drag the email to the desktop. On a phone, pasting the email's text is easiest.
-- Flights a day or less apart, each leaving from where the one before lands, become connections; a later flight becomes the return. The form holds two flights each way; add more afterwards with **Edit** or `connect 1 UA910`. Flights that look like a separate trip are listed so you can add them on their own.
+- Flights a day or less apart, each leaving from where the one before lands, become connections; a later flight becomes the return. Flights that look like a separate trip are listed so you can add them on their own.
 - Times are read as written in the confirmation, which is local to the airport each flight leaves from.
 - Reading a confirmation happens on your server and uses none of your AeroDataBox requests. Lookups start once you add the trip, as usual.
 

@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.20.2:0',
+  version: '0.20.3:0',
   releaseNotes: {
     en_US:
-      'Help is now a full page instead of a small pop-up: a list of topics down the side (under Contents on a phone), search, and an Open in new tab link. The browser\'s Back button closes it, and a Help address like …/#help/importing-a-trip opens straight to that topic, so you can bookmark or send it.',
+      'Easier Add trip form: the return flight is tucked under a "Return flight" section you open when you need it, and connecting flights are added one at a time with "+ Add connection" (and "+ Add return connection"), as many as your trip has, up to 8 flights each way. Import fills in every connection it finds, and Edit can add several at once.',
   },
   migrations: {
     up: async () => {},
