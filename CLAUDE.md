@@ -22,7 +22,7 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 
 ## Build
 
-- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.16.1`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
+- `make x86` → `tailwatcher_x86_64.s9pk` (docker build of `start9/tailwatcher/main:0.16.2`, then `start-cli s9pk pack`). No buildx on this machine, so aarch64 isn't built.
 - Packing needs a git commit (it records the hash) and the `assets/` dir.
 - `make install` sideloads to the host in `~/.startos/config.yaml`.
 
@@ -41,6 +41,6 @@ Headless StartOS 0.4 service: watches tail numbers and airline flight numbers on
 - Dependency title/icon only show if `manifest.dependencies.ntfy.s9pk` points at a real NTFY s9pk; a `metadata` block is ignored by start-cli.
 - airplanes.live now requires approval (403); data sources are adsb.fi (default) and adsb.lol. adsb.lol's headers say 4/s, 60/min and **500/day**, which one-request-per-aircraft polling blew through, so each cycle now does one batched poll (`fetch_many`: comma-separated keys, 25 per request, tails and callsigns separately) covering watched aircraft plus `trip_poll_keys()`; `poll_all` falls back to the other feed on errors/429. Never reintroduce per-aircraft requests in the loop.
 - Detection: ground→air = "departed"; first seen airborne after 20+ min unseen = "is airborne" (small fields lack ground coverage).
-- A stored "ground" status never changes once a parked plane stops transmitting, so `snapshot()` sends `live` (seen within GAP_SECONDS): the dashboard shows "Parked · seen X ago" (Board: PARKED) when not live, and `mapLink(a)` only links live planes.
+- A stored "ground" status never changes once a parked plane stops transmitting, so `snapshot()` sends `live` (seen within GAP_SECONDS): the dashboard shows "Parked · seen X ago" (Board: PARKED) when not live, and `mapLink(a)` only links live planes. Next to it, `where` (from `Airports.place()` on the last fix) gives a plain-text location: "at KFDK – …" on the ground (within 3 nm), else "near City, ST" / "N nm NE of City, ST" from medium/large airports' `city`/`region` columns (added to airports.csv by trim_airports.py; US/CA/AU use the state, elsewhere the country code), else coordinates; non-live planes show it as "last seen …".
 - Flights are polled by callsign (`/v2/callsign/{CS}` on both adsb.lol and adsb.fi) and state is keyed by callsign, so "UA1234" and "UAL1234" are one entry. Tail-vs-flight rule lives in `flights.parse_flight` (dash or N+digit → tail; 3 letters+digits or a known IATA code+1–4 digits → flight; else tail). New Python modules must be added to the Dockerfile `COPY` line.
 - Expiry: the watcher calls `remove_expired()` at the top of each cycle and posts "⌛ Stopped watching X (expired)"; `load_config` also skips expired entries. "until fri" = 3am the next day in `timeZone` (Configure, default America/New_York); the container is UTC, so never use the container date. The Configure form shows `expiresDays`; saving it unchanged keeps the stored `expires`.

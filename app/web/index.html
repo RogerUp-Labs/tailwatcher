@@ -439,6 +439,9 @@ const hue = (i) => HUES[i % HUES.length];  // by watcher order, so neighbours ne
 // Only while the plane is transmitting: a parked plane's map shows nothing live.
 const mapLink = (a) => a.hex && a.live ? `https://globe.adsbexchange.com/?icao=${encodeURIComponent(a.hex)}` : null;
 
+// "near Denver, CO" from the last fix; a quiet plane's is where it was last heard.
+const whereText = (a) => a.where ? (a.live ? a.where : "last seen " + a.where) : "";
+
 function statusChip(a) {
   if (a.status === "airborne") {
     const bits = [typeof a.alt === "number" ? num(a.alt) + " ft" : "", a.gs ? Math.round(a.gs) + " kt" : ""].filter(Boolean).join(" · ");
@@ -490,6 +493,7 @@ function renderWatchers(d) {
           a.type ? `<span>${esc(a.type)}</span>` : "",
           a.callsign && a.callsign !== a.ident ? `<span>${esc(a.callsign)}</span>` : "",
           a.expires ? `<span class="chip warn">stops ${until(a.expires)}</span>` : "",
+          whereText(a) ? `<span>📍 ${esc(whereText(a))}</span>` : "",
           link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">Live map ↗</a>` : "",
           `<button type="button" class="linkbtn" data-act="edit-aircraft" data-topic="${esc(w.topic)}" data-ident="${esc(a.ident)}">Edit</button>`,
         ].filter(Boolean).join("");
@@ -697,8 +701,9 @@ function renderWatchersBoard(d) {
       const link = mapLink(a);
       const bits = [a.label ? `<b>${esc(a.label)}</b>` : "", a.kind === "flight" && a.reg ? `flown by ${esc(a.reg)}` : "",
         a.type ? esc(a.type) : "", a.status === "airborne" && a.gs ? `${Math.round(a.gs)} kt` : "",
-        !a.live && a.last_seen ? `seen ${ago(a.last_seen)}` : "",
+        !a.live && a.last_seen ? esc(`seen ${ago(a.last_seen)}${a.where ? " " + a.where : ""}`) : "",
         a.expires ? `<span class="o">stops ${until(a.expires)}</span>` : "",
+        a.live && a.where ? esc(a.where) : "",
         link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">live map ↗</a>` : "",
         `<button type="button" class="linkbtn" data-act="edit-aircraft" data-topic="${esc(w.topic)}" data-ident="${esc(a.ident)}">edit</button>`].filter(Boolean);
       return `<div class="flap-row cols-fleet">${flaps(k + ":id", a.ident, 7)}${flaps(k + ":alt", alt, 5, sc === "y" ? "y" : "")}${flaps(k + ":s", status, 9, sc)}</div>

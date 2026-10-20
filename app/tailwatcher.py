@@ -42,7 +42,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.16.1"
+VERSION = "0.16.2"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/RogerUp-Labs/tailwatcher)"
 
 DATA_SOURCES = {
@@ -163,6 +163,7 @@ class Airports:
         self.coords = {}  # ident -> (lat, lon, name)
         self.iata = {}    # "IAD" -> "KIAD"
         self.tz = {}      # ident -> "America/New_York"
+        self.towns = []   # (lat, lon, "Denver, CO") from medium/large airports' cities
         try:
             with open(path, newline="") as f:
                 for r in csv.DictReader(f):
@@ -173,6 +174,9 @@ class Airports:
                         self.iata.setdefault(r["iata"], r["ident"])
                     if r.get("tz"):
                         self.tz[r["ident"]] = r["tz"]
+                    if r.get("city") and r.get("size") in ("m", "l"):
+                        town = f"{r['city']}, {r['region']}" if r.get("region") else r["city"]
+                        self.towns.append((lat, lon, town))
         except (OSError, KeyError, ValueError) as e:
             log.warning("airport database unavailable (%s)", e)
 
@@ -185,6 +189,45 @@ class Airports:
             if d < best_d:
                 best, best_d = (ident, name), d
         return (best[0], best[1], best_d) if best else None
+
+
+    def town(self, lat, lon, max_nm=300):
+        """Nearest city with a sizeable airport: (town, distance_nm, bearing) or None."""
+        best, best_d = None, max_nm
+        for alat, alon, name in self.towns:
+            if abs(alat - lat) > max_nm / 60:
+                continue
+            d = haversine_nm(alat, alon, lat, lon)
+            if d < best_d:
+                best, best_d = (name, alat, alon), d
+        return (best[0], best_d, bearing(best[1], best[2], lat, lon)) if best else None
+
+    def place(self, lat, lon, on_ground=False):
+        """Plain-text approximate location for the dashboard: "at KFDK – Frederick
+        Municipal Airport", "near Denver, CO", "40 nm NE of Denver, CO", or
+        coordinates when nothing is near (oceans, or no airport data)."""
+        if lat is None or lon is None:
+            return None
+        if on_ground:
+            apt = self.nearest(lat, lon, 3)
+            if apt:
+                return f"at {apt[0]} – {apt[1]}"
+        town = self.town(lat, lon)
+        if town:
+            name, d, brg = town
+            return f"near {name}" if d < 15 else f"{d:.0f} nm {COMPASS[round(brg / 45) % 8]} of {name}"
+        return f"{abs(lat):.1f}°{'N' if lat >= 0 else 'S'} {abs(lon):.1f}°{'E' if lon >= 0 else 'W'}"
+
+
+COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def bearing(lat1, lon1, lat2, lon2):
+    """Initial bearing in degrees from point 1 to point 2."""
+    p1, p2, dl = math.radians(lat1), math.radians(lat2), math.radians(lon2 - lon1)
+    x = math.sin(dl) * math.cos(p2)
+    y = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return math.degrees(math.atan2(x, y)) % 360
 
 
 def haversine_nm(lat1, lon1, lat2, lon2):
@@ -863,6 +906,7 @@ def run():
                     # never changes until it flies again; only a recent fix is live.
                     "live": now - (s_.get("last_seen") or 0) <= GAP_SECONDS,
                     "hex": s_.get("hex"), "alt": fix.get("alt_baro"), "gs": fix.get("gs"),
+                    "where": airports.place(fix.get("lat"), fix.get("lon"), fix.get("alt_baro") == "ground"),
                     "callsign": (fix.get("flight") or "").strip(), "type": fix.get("t"), "reg": fix.get("r")})
             watchers_out.append({"name": w["name"], "topic": w["topic"], "priority": w["priority"],
                                  "notify_landing": w["notify_landing"], "aircraft": aircraft, "following": []})

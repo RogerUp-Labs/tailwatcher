@@ -104,7 +104,7 @@ They get a note that you shared a flight, a heads-up if the time changes or the 
 The Web UI shows everyone's watchers and trips in one place:
 
 - **Trips:** route, departure, the plane flying in, how far along it is, and when TailWatcher checks next
-- **Watchers:** each person's planes and flights, what's airborne now, and live-map links. A plane that landed and went quiet shows **Parked** with when it was last seen, and its live-map link comes back when it's on the radar again
+- **Watchers:** each person's planes and flights, what's airborne now, and live-map links. A plane that landed and went quiet shows **Parked** with when it was last seen, and its live-map link comes back when it's on the radar again. Next to the live-map link is roughly where the plane is ("near Denver, CO", "40 nm NE of Denver, CO", or the airport it's at), or where it was last seen
 - **Activity:** recent alerts, replies, text commands and edits
 - **System:** whether notifications, text commands and trip lookups are working
 
