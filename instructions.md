@@ -26,7 +26,7 @@ If the link doesn't open the app, open the web link shown under it, or in the nt
 
 **With your own NTFY**, phones also have to trust its https certificate. A Start9 signs its addresses (.local, LAN and public IP addresses, including StartTunnel's) with its own root certificate, which phones don't know, so a phone that hasn't installed it gets a certificate error in the ntfy app (see **The ntfy app says "Trust anchor for certification path not found"**). That's easy to miss when your own phone trusted it long ago. StartTunnel forwards traffic to your Start9 but doesn't change the certificate: on its public IP address, phones still see the Start9's own. Two ways around it:
 
-- **Recommended for people outside your household:** give NTFY a public domain (a domain name you own) through your StartTunnel gateway, with a Let's Encrypt certificate. Every phone trusts that already. See Start9's [public access guide](https://docs.start9.com/start-os/0.4.0.x/public-access.html); do the same for TailWatcher's Web UI so invite links use the domain too.
+- **Recommended for people outside your household:** give NTFY a public domain (a domain name you own) through your StartTunnel gateway, with a Let's Encrypt certificate. Every phone trusts that already. See Start9's [public access guide](https://docs.start9.com/start-os/0.4.0.x/public-access.html); do the same for TailWatcher's Web UI so invite links use the domain too. TailWatcher picks up both domains by itself and prefers them over a public IP; then send new **Connect phone** links or invites.
 - **For your own phones:** install your Start9's root certificate on each one ([Start9's guide](https://docs.start9.com/start-os/0.4.0.x/trust-ca.html)).
 
 ntfy.sh needs neither.

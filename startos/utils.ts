@@ -20,23 +20,37 @@ export const newTopic = (name: string) =>
  * links that work away from home. Null if it only has LAN addresses.
  */
 export const ownPublicUrl = (effects: T.Effects) =>
-  sdk.serviceInterface.getOwn(effects, 'ui', (i) =>
-    i?.addressInfo
-      ?.filter({ visibility: 'public', predicate: (h) => h.ssl })
-      .format()[0] ?? null,
-  )
+  sdk.serviceInterface.getOwn(effects, 'ui', (i) => {
+    const info = i?.addressInfo
+    if (!info) return null
+    // A public domain (Let's Encrypt) before a public IP, which only has the
+    // server's own root certificate that phones don't trust.
+    const domain = info
+      .filter({ visibility: 'public', kind: 'domain', predicate: (h) => h.ssl })
+      .format()
+    const pub = info
+      .filter({ visibility: 'public', predicate: (h) => h.ssl })
+      .format()
+    return domain[0] ?? pub[0] ?? null
+  })
 
 /**
  * The address phones use to reach this server's NTFY, for "Connect phone"
- * links: a public HTTPS domain if NTFY has one, else its LAN HTTPS address.
+ * links: a public HTTPS domain if NTFY has one, else a public IP, else its
+ * LAN HTTPS address.
  */
 export const ntfyPhoneUrl = (effects: T.Effects) =>
   sdk.serviceInterface.get(effects, { packageId: 'ntfy', id: 'ui' }, (i) => {
     const info = i?.addressInfo
     if (!info) return null
-    const pub = info.filter({ visibility: 'public', predicate: (h) => h.ssl }).format()
+    const domain = info
+      .filter({ visibility: 'public', kind: 'domain', predicate: (h) => h.ssl })
+      .format()
+    const pub = info
+      .filter({ visibility: 'public', predicate: (h) => h.ssl })
+      .format()
     const lan = info.filter({ kind: 'mdns', predicate: (h) => h.ssl }).format()
-    return pub[0] ?? lan[0] ?? null
+    return domain[0] ?? pub[0] ?? lan[0] ?? null
   })
 
 /**
