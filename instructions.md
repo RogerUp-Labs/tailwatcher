@@ -100,6 +100,23 @@ Before a flight, the plane you'll fly on is usually still finishing an earlier f
 
 Arrival estimates come from the plane's live position and speed, so treat them as an early warning rather than the airline's official time. Trips clear themselves a few hours after departure.
 
+## Importing a trip
+
+Instead of typing flight numbers, tap **Import** next to **+ Add trip** and paste your booking confirmation or choose a file. TailWatcher finds the flights and fills in the **Add trip** form, with connections and the flight home where it can tell them apart. Check every field, fix anything it got wrong, then tap **Add trip**. Nothing is saved until you do.
+
+| What you give it | What it reads |
+| --- | --- |
+| Pasted text from a confirmation email, an airline app or a booking site | Flight numbers (`UA 1234`, `United 1234`), with the date, departure time and airport codes nearest each |
+| A saved email (.eml) | The hidden flight details most airlines and booking sites include for Gmail's flight cards; otherwise a calendar invite attached to it; otherwise its text |
+| A calendar file (.ics), from an airline's "Add to calendar", TripIt or Kayak Trips | One flight per event, at the event's start time |
+| A web page (.html) or text file (.txt) | The same as pasted text |
+
+- **PDFs, screenshots and Word files can't be read.** Open the file, select all the text, copy it and paste it into the box instead.
+- **Saving an email as .eml:** in Gmail on a computer, open the email, then ⋮ → **Download message**. In Outlook, **File → Save As**. In Apple Mail, drag the email to the desktop. On a phone, pasting the email's text is easiest.
+- Flights a day or less apart, each leaving from where the one before lands, become connections; a later flight becomes the return. The form holds two flights each way; add more afterwards with **Edit** or `connect 1 UA910`. Flights that look like a separate trip are listed so you can add them on their own.
+- Times are read as written in the confirmation, which is local to the airport each flight leaves from.
+- Reading a confirmation happens on your server and uses none of your AeroDataBox requests. Lookups start once you add the trip, as usual.
+
 ## Sharing a trip with family
 
 Your trip alerts are about the plane coming to get *you*; family usually wants to know when your flight leaves and lands. Tick their names under **Share with** on the trip form, or text `share 1 Mom & Dad`.

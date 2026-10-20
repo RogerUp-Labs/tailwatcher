@@ -32,6 +32,7 @@ import edits
 import flights
 import history
 import invites
+import itinerary
 import lookup
 import ntfy_admin
 import trips
@@ -42,7 +43,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.17.0"
+VERSION = "0.18.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/RogerUp-Labs/tailwatcher)"
 
 DATA_SOURCES = {
@@ -1095,6 +1096,10 @@ def run():
             return ntfy_post(path, data)
         if path == "/api/invite":
             return invite_post(data)
+        if path == "/api/import":  # read only: it pre-fills the Add trip form, nothing is saved
+            found = itinerary.preview(str(data.get("text") or ""), str(data.get("name") or ""),
+                                      time.time(), load_config()["time_zone"], airports)
+            return (200 if found["ok"] else 400), found
         topic = str(data.get("topic") or "")
         op = data.get("op")
         names = {w["topic"]: w["name"] for w in load_config()["watchers"]}  # fresh: see snapshot()

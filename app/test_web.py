@@ -129,5 +129,26 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(tw.message_kind({"tags": ["airplane", "test_tube"]}), "test")
 
 
+
+class PostSizeTest(unittest.TestCase):
+    def test_only_import_takes_a_whole_email(self):
+        srv = web.serve(0, Health(), lambda: {}, password_path="/nonexistent", web_dir=tempfile.mkdtemp(),
+                        post=lambda path, data: (200, {"ok": True, "size": len(data.get("text", ""))}))
+        try:
+            body = json.dumps({"text": "x" * 300_000}).encode()
+            for path, want in (("/api/import", 200), ("/api/trip", 400)):
+                req = urllib.request.Request(f"http://127.0.0.1:{srv.server_address[1]}{path}", data=body,
+                                             headers={"Content-Type": "application/json", "X-TailWatcher": "1"})
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as r:
+                        code = r.status
+                except urllib.error.HTTPError as e:
+                    code = e.code
+                self.assertEqual(code, want, path)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()

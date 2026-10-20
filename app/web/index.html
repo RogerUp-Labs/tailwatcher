@@ -139,7 +139,7 @@ section h2 .count { background: var(--surface); border: 1px solid var(--border);
 .j-head { padding: 12px 14px 0; font-size: 12px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--accent); }
 .journey .trip + .trip { border-top: 1px dashed var(--border); }
 .form-sub { margin: 6px 0 -2px; padding-top: 10px; border-top: 1px solid var(--border); font-weight: 600; }
-.form-sub small { display: block; font-weight: 400; color: var(--text-3); }
+.form-sub small { display: block; font-weight: 400; color: var(--text-3); white-space: pre-line; }
 .t-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .t-flight { font-family: var(--mono); font-weight: 800; font-size: 20px; letter-spacing: .3px; }
 .t-when { color: var(--text-2); }
@@ -214,6 +214,7 @@ footer { color: var(--text-3); font-size: 12px; text-align: center; margin-top: 
 .btn.danger { color: var(--bad); border-color: transparent; background: transparent; margin-right: auto; padding-left: 0; }
 .linkbtn { font: inherit; font-size: inherit; background: none; border: 0; padding: 0; color: var(--brand); cursor: pointer; }
 .linkbtn:hover { text-decoration: underline; }
+section h2 .add + .add { margin-left: 14px; }
 section h2 .add { margin-left: auto; font-size: 12px; letter-spacing: 0; text-transform: none; font-weight: 600; }
 .w-head .linkbtn, .flap-group .linkbtn { font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform: none; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .ac-edit { margin-left: 6px; }
@@ -224,8 +225,9 @@ dialog form { padding: 18px; display: grid; gap: 12px; }
 dialog h3 { margin: 0 0 2px; font-size: 17px; }
 .theme-board dialog h3 { font-family: var(--board-font); letter-spacing: 1.5px; text-transform: uppercase; color: #ffd23f; }
 .field { display: grid; gap: 4px; font-size: 13px; color: var(--text-2); }
-.field input, .field select { font: inherit; font-size: 15px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); width: 100%; }
-.field input:focus, .field select:focus { outline: 2px solid var(--brand); outline-offset: 0; }
+.field input, .field select, .field textarea { font: inherit; font-size: 15px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); width: 100%; }
+.field textarea { min-height: 150px; resize: vertical; font-size: 13px; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--brand); outline-offset: 0; }
 .field small { color: var(--text-3); font-size: 12px; }
 .field.check { grid-template-columns: auto 1fr; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
 .field.check input { width: 18px; height: 18px; }
@@ -395,7 +397,7 @@ dialog.help { width: min(720px, calc(100vw - 24px)); }
   <div class="stats" id="stats"></div>
   <div class="grid">
     <div class="col">
-      <section aria-labelledby="h-trips"><h2 id="h-trips">Trips <span class="count" id="c-trips">0</span><button type="button" class="linkbtn add" data-act="add-trip">+ Add trip</button></h2><div class="card" id="trips"></div></section>
+      <section aria-labelledby="h-trips"><h2 id="h-trips">Trips <span class="count" id="c-trips">0</span><button type="button" class="linkbtn add" data-act="add-trip">+ Add trip</button><button type="button" class="linkbtn add" data-act="import-trip">Import</button></h2><div class="card" id="trips"></div></section>
       <section aria-labelledby="h-watch"><h2 id="h-watch">Watchers <span class="count" id="c-watch">0</span><button type="button" class="linkbtn add" data-act="add-watcher">+ Add watcher</button></h2><div id="watchers"></div></section>
     </div>
     <div class="col">
@@ -847,7 +849,7 @@ const watcherOptions = () => LAST.watchers.map((w) => [w.topic, w.name]);
 const slug = (s) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 const localDate = (t) => new Intl.DateTimeFormat("en-CA", {timeZone: TZ}).format(t * 1000);
 
-function tripForm(t) {
+function tripForm(t, pre, intro) {
   const inb = (t && t.inbound) || {};
   const adb = LAST.settings.aerodatabox;
   const others = t ? othersOf(t) : [];
@@ -860,6 +862,7 @@ function tripForm(t) {
     {name: prefix + "plane", label: "Plane flying in", placeholder: "N12345 or UA890", hint: adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the connection)."},
   ];
   const fields = [
+    ...(intro ? [intro] : []),
     ...(t ? [] : [{name: "topic", label: "For", type: "select", options: watcherOptions()}]),
     [{name: "flight", label: "Your flight", value: t ? t.flight : "", placeholder: "UA1234", required: true},
      {name: "date", label: "Date", type: "date", value: t ? t.date : localDate(NOW)}],
@@ -883,7 +886,8 @@ function tripForm(t) {
      hint: others.length ? `Covers every flight of this trip (${[t, ...others].map((x) => x.flight).join(", ")}). They get each flight's departure and landing, nothing else.`
        : "They get your flight's departure and landing, nothing else."},
   ];
-  if (!t) return openForm({title: "Add trip", fields, saveLabel: "Add trip",
+  if (pre) for (const f of fields.flat()) if (f.name && f.name in pre) f.value = pre[f.name];
+  if (!t) return openForm({title: pre ? "Check your imported trip" : "Add trip", fields, saveLabel: "Add trip",
     save: (v) => api("api/trip", {op: "add", ...v, share: (v.share || []).filter((x) => x !== v.topic)})});
   const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", airport: apt(t.dep_airport), to: apt(t.get_off), plane: inb.tail || inb.flight || ""};
   openForm({title: `Edit ${t.flight} · ${t.watcher}`, fields,
@@ -899,6 +903,43 @@ function tripForm(t) {
       : {label: "Cancel trip", confirm: `Stop tracking ${t.flight}?`, run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number})},
     remove2: others.length ? {label: `Cancel ${t.flight}`, confirm: `Stop tracking ${t.flight} and keep ${others.map((x) => x.flight).join(", ")}?`,
       run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number, only: true})} : null});
+}
+
+/** Import: paste a confirmation or pick a saved email / calendar file; TailWatcher pre-fills Add trip to check. */
+function importForm() {
+  const form = $("dlg-form");
+  let file = null;
+  form.innerHTML = `<h3 id="dlg-title">Import a trip</h3>
+    <p class="muted">Paste your booking confirmation, or choose a saved email (.eml) or calendar file (.ics). I'll fill in the Add trip form for you to check.
+      PDFs and screenshots can't be read: open them, copy the text and paste it here. <button type="button" class="linkbtn help-link" data-act="help" data-section="importing-a-trip">? Help</button></p>
+    <label class="field" for="imp-text">Confirmation text<textarea id="imp-text" placeholder="Paste the email or itinerary here" spellcheck="false"></textarea></label>
+    <label class="field" for="imp-file">Or a file<input type="file" id="imp-file" accept=".eml,.ics,.txt,.html,.htm,message/rfc822,text/calendar,text/plain,text/html"><small>Saved emails (.eml), calendar files (.ics), web pages (.html) and text (.txt)</small></label>
+    <div class="form-error" id="dlg-err" role="alert"></div>
+    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Close</button><button type="submit" class="btn primary">Read it</button></div>`;
+  $("imp-file").onchange = (e) => { file = e.target.files[0] || null; $("dlg-err").textContent = ""; };
+  form.oninput = () => { $("dlg-err").textContent = ""; };
+  $("dlg-cancel").onclick = () => $("dlg").close();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    let text = $("imp-text").value, name = "";
+    if (file) {
+      name = file.name;
+      if (file.size > 3 * 1024 * 1024) { $("dlg-err").textContent = "That file is too big to be a confirmation (over 3 MB)."; return; }
+      text = /\.(pdf|png|jpe?g|heic|gif|webp|docx?|pages)$/i.test(name) ? "" : await file.text();
+    }
+    const btn = form.querySelector("[type=submit]");
+    btn.disabled = true; btn.textContent = "Reading…";
+    const r = await api("api/import", {text, name});
+    btn.disabled = false; btn.textContent = "Read it";
+    if (!r.ok) { $("dlg-err").textContent = r.message; return; }
+    const day = (d) => d ? new Date(d + "T12:00:00Z").toLocaleDateString(undefined, {weekday: "short", month: "short", day: "numeric", timeZone: "UTC"}) : "date?";
+    const found = r.flights.map((f) => `${f.flight} ${day(f.date)}${f.time ? " " + f.time : ""}${f.dep ? " " + f.dep : ""}${f.arr ? "→" + f.arr : ""}`);
+    $("dlg").close();
+    tripForm(null, r.form, {type: "heading", label: `${r.message} Check every field before adding.`,
+      hint: [...found, ...r.notes].join("\n")});
+  };
+  $("dlg").showModal();
+  if (matchMedia("(hover: hover)").matches) $("imp-text").focus();
 }
 
 function watcherForm(w) {
@@ -1277,6 +1318,10 @@ function onAction(btn) {
   if (act === "add-trip") {
     if (!LAST.watchers.length) return toast("Add a watcher first.");
     return tripForm(null);
+  }
+  if (act === "import-trip") {
+    if (!LAST.watchers.length) return toast("Add a watcher first.");
+    return importForm();
   }
   if (act === "edit-trip" && t) return tripForm(t);
   if (act === "cancel-trip" && t) {

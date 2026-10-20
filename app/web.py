@@ -47,6 +47,7 @@ def authorized(header, password):
 
 
 MAX_BODY = 64 * 1024
+MAX_IMPORT = 3 * 1024 * 1024  # a saved confirmation email, inline images and all
 
 
 def same_origin(origin, host):
@@ -100,7 +101,7 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 length = -1
-            if not 0 < length <= MAX_BODY:
+            if not 0 < length <= (MAX_IMPORT if path == "/api/import" else MAX_BODY):
                 return self.reply(400, {"ok": False, "message": "Bad request."})
             try:
                 data = json.loads(self.rfile.read(length))

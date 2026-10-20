@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.17.0:0',
+  version: '0.18.0:0',
   releaseNotes: {
     en_US:
-      'Connecting flights and stops: add a connection with then (inbound UA1234 then UA567), connect 1 UA567, or the new Connecting flight row on + Add trip. The flights are listed, shared and cancelled together like a round trip. On the day, TailWatcher follows your first flight and tells you how many minutes you will have to make the next one, warns when that gets tight, and tells you when you land. With AeroDataBox it also warns ahead of time when the scheduled connection is tight. Flights with a stop under one flight number now work too: say from or to the stop if you board or get off there, the plane coming in is found correctly, and family only gets the landing alert at your real destination.',
+      'Import a trip: tap Import next to + Add trip and paste your booking confirmation, or choose a saved email (.eml) or calendar file (.ics). TailWatcher finds the flights, connections and flight home and fills in the Add trip form for you to check before adding. It reads the flight details airlines and booking sites hide in confirmation emails, calendar events from Add to calendar, TripIt or Kayak, and plain text. PDFs and screenshots can\'t be read yet: copy their text and paste it instead. Reading a confirmation uses none of your AeroDataBox requests.',
   },
   migrations: {
     up: async () => {},
