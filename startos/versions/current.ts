@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.16.0:0',
+  version: '0.18.0:0',
   releaseNotes: {
     en_US:
-      'Round trips: enter your flight out and your flight home in one go, by text (inbound UA1234 11/14 return UA5678 11/21) or with the new Return flight row on + Add trip. Both flights are tracked as one trip: they\'re listed together, sharing covers both with a single note to family, and cancelling covers both unless you say only. return 1 UA5678 11/21 adds the flight home to a trip you already have. The return leaves from where the outbound lands unless you say otherwise. With AeroDataBox, a round trip booked a month ahead uses about 40 of the free plan\'s 400 monthly requests.',
+      'Import a trip: tap Import next to + Add trip and paste your booking confirmation, or choose a saved email (.eml) or calendar file (.ics). TailWatcher finds the flights, connections and flight home and fills in the Add trip form for you to check before adding. It reads the flight details airlines and booking sites hide in confirmation emails, calendar events from Add to calendar, TripIt or Kayak, and plain text. PDFs and screenshots can\'t be read yet: copy their text and paste it instead. Reading a confirmation uses none of your AeroDataBox requests.',
   },
   migrations: {
     up: async () => {},

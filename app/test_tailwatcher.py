@@ -52,6 +52,28 @@ class ObserveTest(unittest.TestCase):
         self.assertIsNone(ev)
 
 
+class PlaceTest(unittest.TestCase):
+    def setUp(self):
+        self.airports = tw.Airports("/nonexistent")
+        self.airports.rows = [("KFDK", "Frederick Municipal Airport", 39.4176, -77.3743)]
+        self.airports.towns = [(39.8617, -104.6731, "Denver, CO"), (39.4176, -77.3743, "Frederick, MD")]
+
+    def test_near_town(self):
+        self.assertEqual(self.airports.place(39.9, -104.7), "near Denver, CO")
+
+    def test_distance_and_direction(self):
+        # about 44 nm north-east of Denver's airport
+        self.assertEqual(self.airports.place(40.33, -103.95), "44 nm NE of Denver, CO")
+
+    def test_on_ground_names_the_airport(self):
+        self.assertEqual(self.airports.place(39.418, -77.375, on_ground=True), "at KFDK – Frederick Municipal Airport")
+        self.assertEqual(self.airports.place(39.418, -77.375), "near Frederick, MD")
+
+    def test_far_from_anything_gives_coordinates(self):
+        self.assertEqual(self.airports.place(45.04, -30.5), "45.0°N 30.5°W")
+        self.assertIsNone(self.airports.place(None, None))
+
+
 class MessageTest(unittest.TestCase):
     def setUp(self):
         self.airports = tw.Airports("/nonexistent")

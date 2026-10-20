@@ -2,7 +2,8 @@
 
 usage: trim_airports.py airports-full.csv airports.csv [tz.json]
 
-OurAirports has no time zones, so tz.json (mwgg/Airports: ICAO -> {iata, lat,
+city/region/size let the dashboard say where a plane is ("40 nm NE of
+Denver, CO"). OurAirports has no time zones, so tz.json (mwgg/Airports: ICAO -> {iata, lat,
 lon, tz}) supplies them: matched by ICAO, then IATA, else the nearest airport
 within NEAR_NM that has one (small fields share their neighbours' zone).
 """
@@ -14,6 +15,7 @@ import sys
 
 KEEP = {"small_airport", "medium_airport", "large_airport", "seaplane_base"}
 NEAR_NM = 150
+STATE_COUNTRIES = {"US", "CA", "AU"}
 
 
 def nm(lat1, lon1, lat2, lon2):
@@ -64,14 +66,18 @@ def main(src, dst, tz_path=None):
     zones = Zones(tz_path)
     with open(src, newline="", encoding="utf-8") as fin, open(dst, "w", newline="") as fout:
         out = csv.writer(fout)
-        out.writerow(["ident", "name", "lat", "lon", "iata", "tz"])
+        out.writerow(["ident", "name", "lat", "lon", "iata", "tz", "city", "region", "size"])
         for r in csv.DictReader(fin):
             if r["type"] in KEEP:
                 ident = r.get("icao_code") or r.get("gps_code") or r.get("local_code") or r["ident"]
                 iata = r.get("iata_code") or ""
                 lat, lon = float(r["latitude_deg"]), float(r["longitude_deg"])
                 tz = zones.find((ident, r["ident"]), iata, lat, lon)
-                out.writerow([ident, r["name"], r["latitude_deg"], r["longitude_deg"], iata, tz])
+                country = r.get("iso_country") or ""
+                # "US-CO" -> "CO" where people name states; elsewhere the country code.
+                region = (r.get("iso_region") or "").split("-")[-1] if country in STATE_COUNTRIES else country
+                out.writerow([ident, r["name"], r["latitude_deg"], r["longitude_deg"], iata, tz,
+                              r.get("municipality") or "", region, r["type"][0]])
 
 
 if __name__ == "__main__":

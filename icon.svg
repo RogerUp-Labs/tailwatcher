@@ -4,30 +4,26 @@
       <stop offset="0" stop-color="#0a1a33"/>
       <stop offset="1" stop-color="#1f5fa8"/>
     </linearGradient>
-    <linearGradient id="trail" x1="0" y1="1" x2="1" y2="0">
-      <stop offset="0" stop-color="#fff" stop-opacity="0"/>
-      <stop offset="1" stop-color="#fff" stop-opacity="0.75"/>
-    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#ffd2a8"/>
+      <stop offset="0.55" stop-color="#ff8a3d"/>
+      <stop offset="1" stop-color="#e2611a"/>
+    </radialGradient>
     <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath>
   </defs>
   <g clip-path="url(#tile)">
     <rect width="512" height="512" fill="url(#sky)"/>
-    <!-- radar rings sweeping out from the runway corner -->
-    <g fill="none" stroke="#9cc8ff" stroke-width="10">
-      <circle cx="96" cy="416" r="130" stroke-opacity="0.22"/>
-      <circle cx="96" cy="416" r="230" stroke-opacity="0.15"/>
-      <circle cx="96" cy="416" r="330" stroke-opacity="0.09"/>
+    <!-- a T-tail jet seen from behind: fin and stabilizer form the T, the W sits in the fuselage -->
+    <g transform="translate(0 -33)">
+      <circle cx="256" cy="322" r="118" fill="#fff" fill-opacity="0.08"/>
+      <path d="M100 196 L256 154 L412 196" fill="none" stroke="#fff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M256 154 L256 300" stroke="#fff" stroke-width="34" stroke-linecap="round"/>
+      <path d="M150 262 L196 424 L256 300 L316 424 L362 262" fill="none" stroke="#fff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- rear-mounted engines, exhausts lit -->
+      <circle cx="110" cy="300" r="42" fill="#fff"/>
+      <circle cx="110" cy="300" r="27" fill="url(#glow)"/>
+      <circle cx="402" cy="300" r="42" fill="#fff"/>
+      <circle cx="402" cy="300" r="27" fill="url(#glow)"/>
     </g>
-    <!-- runway -->
-    <rect x="40" y="430" width="200" height="14" rx="7" fill="#ffffff" fill-opacity="0.18"/>
-    <!-- climb trail -->
-    <path d="M104 414 L210 308" stroke="url(#trail)" stroke-width="14" stroke-linecap="round" stroke-dasharray="2 26"/>
-    <!-- aircraft, climbing out at 45° -->
-    <path transform="translate(278 238) rotate(45) scale(1.18)" fill="#ffffff"
-      d="M0,-100 C8,-100 12,-90 12,-78 L12,-24 L96,20 L96,40 L12,16 L12,56 L36,74 L36,90 L0,80 L-36,90 L-36,74 L-12,56 L-12,16 L-96,40 L-96,20 L-12,-24 L-12,-78 C-12,-90 -8,-100 0,-100 Z"/>
   </g>
-  <!-- notification badge -->
-  <circle cx="414" cy="98" r="54" fill="#ff8a3d" stroke="#0e2546" stroke-width="12"/>
-  <path d="M414 70 v34" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
-  <circle cx="414" cy="126" r="7.5" fill="#fff"/>
 </svg>

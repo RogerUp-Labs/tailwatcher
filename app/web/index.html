@@ -85,9 +85,11 @@ a:hover { text-decoration: underline; }
   padding: 6px 10px; border-radius: 999px; font-size: 13px;
 }
 .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42vw; }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: #4cc983; flex: none; box-shadow: 0 0 0 3px rgba(76,201,131,.25); }
-.dot.bad { background: #ff6b63; box-shadow: 0 0 0 3px rgba(255,107,99,.25); }
-.dot.wait { background: #ffb547; box-shadow: 0 0 0 3px rgba(255,181,71,.25); }
+/* The halo is a border, not a box-shadow, so it can't drift off-centre from the
+   dot at fractional pixel positions (Safari draws small box-shadows offset). */
+.dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: #4cc983 padding-box; border: 3px solid rgba(76,201,131,.25); margin: -3px; }
+.dot.bad { background-color: #ff6b63; border-color: rgba(255,107,99,.25); }
+.dot.wait { background-color: #ffb547; border-color: rgba(255,181,71,.25); }
 
 /* ---------- layout ---------- */
 main { max-width: 1180px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 32px); }
@@ -139,7 +141,7 @@ section h2 .count { background: var(--surface); border: 1px solid var(--border);
 .j-head { padding: 12px 14px 0; font-size: 12px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: var(--accent); }
 .journey .trip + .trip { border-top: 1px dashed var(--border); }
 .form-sub { margin: 6px 0 -2px; padding-top: 10px; border-top: 1px solid var(--border); font-weight: 600; }
-.form-sub small { display: block; font-weight: 400; color: var(--text-3); }
+.form-sub small { display: block; font-weight: 400; color: var(--text-3); white-space: pre-line; }
 .t-top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .t-flight { font-family: var(--mono); font-weight: 800; font-size: 20px; letter-spacing: .3px; }
 .t-when { color: var(--text-2); }
@@ -214,6 +216,7 @@ footer { color: var(--text-3); font-size: 12px; text-align: center; margin-top: 
 .btn.danger { color: var(--bad); border-color: transparent; background: transparent; margin-right: auto; padding-left: 0; }
 .linkbtn { font: inherit; font-size: inherit; background: none; border: 0; padding: 0; color: var(--brand); cursor: pointer; }
 .linkbtn:hover { text-decoration: underline; }
+section h2 .add + .add { margin-left: 14px; }
 section h2 .add { margin-left: auto; font-size: 12px; letter-spacing: 0; text-transform: none; font-weight: 600; }
 .w-head .linkbtn, .flap-group .linkbtn { font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform: none; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .ac-edit { margin-left: 6px; }
@@ -224,8 +227,9 @@ dialog form { padding: 18px; display: grid; gap: 12px; }
 dialog h3 { margin: 0 0 2px; font-size: 17px; }
 .theme-board dialog h3 { font-family: var(--board-font); letter-spacing: 1.5px; text-transform: uppercase; color: #ffd23f; }
 .field { display: grid; gap: 4px; font-size: 13px; color: var(--text-2); }
-.field input, .field select { font: inherit; font-size: 15px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); width: 100%; }
-.field input:focus, .field select:focus { outline: 2px solid var(--brand); outline-offset: 0; }
+.field input, .field select, .field textarea { font: inherit; font-size: 15px; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); width: 100%; }
+.field textarea { min-height: 150px; resize: vertical; font-size: 13px; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--brand); outline-offset: 0; }
 .field small { color: var(--text-3); font-size: 12px; }
 .field.check { grid-template-columns: auto 1fr; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
 .field.check input { width: 18px; height: 18px; }
@@ -358,7 +362,9 @@ dialog.help { width: min(720px, calc(100vw - 24px)); }
 .flap-sub code { font-family: var(--mono); color: #ffd23f; }
 .flap-group { font-family: var(--board-font); letter-spacing: 1.5px; text-transform: uppercase; font-size: 13px; color: var(--text-2); margin: 10px 2px 8px; display: flex; gap: 8px; align-items: baseline; }
 .flap-group:first-child { margin-top: 0; }
-.flap-group small { font-family: var(--mono); letter-spacing: 0; text-transform: none; color: var(--text-3); font-size: 11px; }
+.flap-group { flex-wrap: wrap; row-gap: 4px; }
+.flap-group small { font-family: var(--mono); letter-spacing: 0; text-transform: none; color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; min-width: 0; }
+.flap-group .linkbtn { white-space: nowrap; }
 .flap-group .tag { font-family: system-ui, sans-serif; letter-spacing: 0; }
 .only-wide { display: flex; }
 .only-narrow { display: none; }
@@ -373,6 +379,11 @@ dialog.help { width: min(720px, calc(100vw - 24px)); }
   .cols-trip { grid-template-columns: auto auto auto; }
   .only-wide { display: none; }
   .only-narrow { display: inline; }
+}
+/* Small phones (360 px): a trip row is 21 tiles, so shrink them to fit. */
+@media (max-width: 380px) {
+  .theme-board { --tile-w: 12px; --tile-h: 20px; --tile-font: 11.5px; }
+  .flap-head, .flap-row { gap: 6px; }
 }
 </style>
 </head>
@@ -395,7 +406,7 @@ dialog.help { width: min(720px, calc(100vw - 24px)); }
   <div class="stats" id="stats"></div>
   <div class="grid">
     <div class="col">
-      <section aria-labelledby="h-trips"><h2 id="h-trips">Trips <span class="count" id="c-trips">0</span><button type="button" class="linkbtn add" data-act="add-trip">+ Add trip</button></h2><div class="card" id="trips"></div></section>
+      <section aria-labelledby="h-trips"><h2 id="h-trips">Trips <span class="count" id="c-trips">0</span><button type="button" class="linkbtn add" data-act="add-trip">+ Add trip</button><button type="button" class="linkbtn add" data-act="import-trip">Import</button></h2><div class="card" id="trips"></div></section>
       <section aria-labelledby="h-watch"><h2 id="h-watch">Watchers <span class="count" id="c-watch">0</span><button type="button" class="linkbtn add" data-act="add-watcher">+ Add watcher</button></h2><div id="watchers"></div></section>
     </div>
     <div class="col">
@@ -436,14 +447,19 @@ const num = (n) => Number(n).toLocaleString();
 const initials = (name) => (name || "?").trim().split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 const HUES = ["#1f5fa8", "#7a4cc2", "#1e8a6a", "#c2562b", "#a8326e", "#3a6f2a"];
 const hue = (i) => HUES[i % HUES.length];  // by watcher order, so neighbours never match
-const mapLink = (hex) => hex ? `https://globe.adsbexchange.com/?icao=${encodeURIComponent(hex)}` : null;
+// Only while the plane is transmitting: a parked plane's map shows nothing live.
+const mapLink = (a) => a.hex && a.live ? `https://globe.adsbexchange.com/?icao=${encodeURIComponent(a.hex)}` : null;
+
+// "near Denver, CO" from the last fix; a quiet plane's is where it was last heard.
+const whereText = (a) => a.where ? (a.live ? a.where : "last seen " + a.where) : "";
 
 function statusChip(a) {
   if (a.status === "airborne") {
     const bits = [typeof a.alt === "number" ? num(a.alt) + " ft" : "", a.gs ? Math.round(a.gs) + " kt" : ""].filter(Boolean).join(" · ");
     return `<span class="chip air"><i class="pulse"></i>Airborne${bits ? " · " + bits : ""}</span>`;
   }
-  if (a.status === "ground") return `<span class="chip ground">On the ground</span>`;
+  if (a.status === "ground" && a.live) return `<span class="chip ground">On the ground</span>`;
+  if (a.status === "ground") return `<span class="chip unknown">Parked${a.last_seen ? " · seen " + ago(a.last_seen) : ""}</span>`;
   return `<span class="chip unknown">Not seen${a.last_seen ? " · " + ago(a.last_seen) : ""}</span>`;
 }
 
@@ -481,13 +497,14 @@ function renderWatchers(d) {
       </div>
       ${followingHtml(w)}
       ${w.aircraft.length ? sorted(w.aircraft).map((a) => {
-        const link = mapLink(a.hex);
+        const link = mapLink(a);
         const meta = [
           a.kind === "flight" ? `<span class="tag brand">Flight</span>` : "",
           a.kind === "flight" && a.reg ? `<span>flown by ${esc(a.reg)}</span>` : "",
           a.type ? `<span>${esc(a.type)}</span>` : "",
           a.callsign && a.callsign !== a.ident ? `<span>${esc(a.callsign)}</span>` : "",
           a.expires ? `<span class="chip warn">stops ${until(a.expires)}</span>` : "",
+          whereText(a) ? `<span>📍 ${esc(whereText(a))}</span>` : "",
           link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">Live map ↗</a>` : "",
           `<button type="button" class="linkbtn" data-act="edit-aircraft" data-topic="${esc(w.topic)}" data-ident="${esc(a.ident)}">Edit</button>`,
         ].filter(Boolean).join("");
@@ -515,10 +532,21 @@ function renderTrips(d) {
     return;
   }
   $("trips").innerHTML = journeys(list).map((g) => g.length < 2 ? tripCard(g[0])
-    : `<div class="journey"><div class="j-head">⇄ Round trip · ${esc(g[0].dep_airport || "—")} ⇄ ${esc(g[1].dep_airport || g[0].arr_airport || "?")} · ${fmtDate(g[0].date)} – ${fmtDate(g[1].date)}</div>${g.map(tripCard).join("")}</div>`).join("");
+    : `<div class="journey"><div class="j-head">${journeyHead(g)}</div>${g.map(tripCard).join("")}</div>`).join("");
 }
 
-/** Trips with a round trip's flights side by side: [[t], [out, return], …] in list order. */
+/** "⇄ Round trip · IAD → DEN → LAS ⇄ … · dates" or "🔗 Connecting flights · IAD → DEN → LAS · date". */
+function journeyHead(g) {
+  const route = (legs) => [legs[0].dep_airport, ...legs.map((t, i) => t.arr_airport || (legs[i + 1] && legs[i + 1].dep_airport) || "?")]
+    .map((a) => esc(a || "—")).join(" → ");
+  const out = g.filter((t) => t.leg !== "return"), back = g.filter((t) => t.leg === "return");
+  const dates = g[0].date === g[g.length - 1].date ? fmtDate(g[0].date) : `${fmtDate(g[0].date)} – ${fmtDate(g[g.length - 1].date)}`;
+  if (!back.length) return `🔗 Connecting flights · ${route(out)} · ${dates}`;
+  if (out.length < 2 && back.length < 2) return `⇄ Round trip · ${esc(out[0].dep_airport || "—")} ⇄ ${esc(back[0].dep_airport || out[0].arr_airport || "?")} · ${dates}`;
+  return `⇄ Round trip · ${route(out)} · back ${route(back)} · ${dates}`;
+}
+
+/** Trips with a journey's flights together, in order: [[t], [out, connection, return], …] in list order. */
 function journeys(list) {
   const groups = [], seen = new Map();
   for (const t of list) {
@@ -528,11 +556,19 @@ function journeys(list) {
     groups.push(g);
     if (k) seen.set(k, g);
   }
-  return groups.map((g) => g.sort((a, b) => (a.leg === "return") - (b.leg === "return")));
+  const order = (t) => t.seq ?? (t.leg === "return" ? 1 : 0);
+  return groups.map((g) => g.sort((a, b) => order(a) - order(b)));
 }
 
-/** The other flight of t's round trip, if it's still on the list. */
-const partnerOf = (t) => t.itinerary ? LAST.trips.find((x) => x !== t && x.topic === t.topic && x.itinerary === t.itinerary) : null;
+/** The other flights of t's journey (round trip, connections) still on the list. */
+const othersOf = (t) => t.itinerary ? LAST.trips.filter((x) => x !== t && x.topic === t.topic && x.itinerary === t.itinerary) : [];
+const hasReturn = (t) => t.leg === "return" || othersOf(t).some((x) => x.leg === "return");
+/** "return", "outbound", "connection" … for a flight's place in its journey. */
+function legLabel(t) {
+  if (t.connect_from) return "connection";
+  if (t.leg === "return") return "return";
+  return hasReturn(t) ? "outbound" : "";
+}
 
 function tripCard(t) {
   const inb = t.inbound || {};
@@ -540,6 +576,9 @@ function tripCard(t) {
   const rows = [];
   if (plane) rows.push(["Your plane", `${esc(inb.tail || "")}${inb.tail && inb.flight ? " · " : ""}${esc(inb.flight || "")}${inb.origin ? ` from ${esc(inb.origin)}` : ""}${inb.arr_time ? `, due ${fmtTime(inb.arr_time)}` : ""}`]);
   if (t.departed && !t.landed && t.eta_sent) rows.push(["Arriving", `around ${fmtTime(t.eta_sent)}${t.dep_time ? ` · ${Math.round((t.dep_time - t.eta_sent) / 60)} min before you leave` : ""}`]);
+  if (t.connect_from) rows.push(["Connection", `from ${esc(t.connect_from)}${t.connect_at ? ` in ${esc(t.connect_at)}` : ""}${t.connect_min != null ? ` · ${t.connect_min} min` : ""}`]);
+  if (t.connect_to) rows.push(["Then", esc(t.connect_to)]);
+  if (t.stops && t.stops.length) rows.push(["Stops", esc(t.stops.join(", "))]);
   if (t.shared_names && t.shared_names.length) rows.push(["Shared with", esc(t.shared_names.join(", "))]);
   rows.push(["Source", t.source === "aerodatabox" ? (t.plane_locked ? "AeroDataBox (plane set by you)" : "AeroDataBox") : "Entered by text"]);
   if (t.next_check) rows.push(["Next check", `${until(t.next_check)}${t.last_check ? ` · last ${ago(t.last_check)}` : ""}`]);
@@ -551,11 +590,13 @@ function tripCard(t) {
     banner = `<div class="banner bad">⚠️ No longer listed. Renumbered or cancelled?${r ? ` Likely now <code>${esc(r.flight)}</code> at ${fmtTime(r.dep_time)}. Text <code>change ${t.number} ${esc(r.flight)}</code> to switch.` : ` Text <code>change ${t.number} NEW123</code> with the new number.`}</div>`;
   } else if (t.late && !t.landed) banner = `<div class="banner bad">⚠️ Your plane may land less than 20 minutes before your departure.</div>`;
   else if (t.tight && !t.landed) banner = `<div class="banner warn">⏳ Tight turnaround: under 45 minutes between your plane landing and your departure.</div>`;
+  else if (t.connect_min != null && t.connect_min < 0) banner = `<div class="banner bad">⚠️ ${esc(t.flight)} leaves before ${esc(t.connect_from)} gets in. Check with the airline.</div>`;
+  else if (t.connect_min != null && t.connect_min < 40) banner = `<div class="banner warn">⏳ Tight connection: ${t.connect_min} min from ${esc(t.connect_from)} landing to ${esc(t.flight)} leaving.</div>`;
   return `<article class="trip">
     <div class="t-top">
       <span class="t-flight">${esc(t.flight)}</span>
       <span class="t-when">${t.dep_time ? `${fmtDay(t.dep_time)} · ${fmtTime(t.dep_time)}` : fmtDate(t.date)}</span>
-      <span class="t-who">${esc(t.watcher)} · trip ${t.number}${t.leg === "return" ? " · return" : partnerOf(t) ? " · outbound" : ""}</span>
+      <span class="t-who">${esc(t.watcher)} · trip ${t.number}${legLabel(t) ? " · " + legLabel(t) : ""}</span>
     </div>
     <div class="route">
       <div class="apt">${esc(t.dep_airport || "—")}<small>${t.dep_time ? "departs " + until(t.dep_time) : "departure"}</small></div>
@@ -649,7 +690,10 @@ function renderTripsBoard(d) {
     const k = `trip:${t.topic}:${t.flight}:${t.date}`;
     const when = t.dep_time ? (t.dep_time - NOW < 36 * 3600 ? hhmm(t.dep_time) : mmdd(t.dep_time)) : t.date.slice(5).replace("-", "/");
     const [status, sc] = tripStatus(t);
-    const sub = t.leg === "return" && partnerOf(t) ? [`↩ return of ${esc(partnerOf(t).flight)}`] : [];
+    const first = othersOf(t).find((x) => x.leg !== "return");
+    const sub = t.connect_from ? [`🔗 from ${esc(t.connect_from)}${t.connect_at ? ` at ${esc(apt(t.connect_at))}` : ""}${t.connect_min != null ? ` · <span class="${t.connect_min < 40 ? "o" : ""}">${t.connect_min} min</span>` : ""}`]
+      : t.leg === "return" && first ? [`↩ return of ${esc(first.flight)}`] : [];
+    if (t.stops && t.stops.length) sub.push(`stops ${esc(t.stops.map(apt).join(", "))}`);
     const route = `<span class="only-narrow">${esc(apt(t.dep_airport) || "—")}→${esc(apt(t.arr_airport) || "?")} · </span>`;
     if (inb.tail || inb.flight) {
       sub.push(`your plane <b>${esc(inb.tail || inb.flight)}</b>${inb.tail && inb.flight ? ` as ${esc(inb.flight)}` : ""}${inb.origin ? ` from ${esc(apt(inb.origin))}` : ""}`);
@@ -676,7 +720,8 @@ function renderTripsBoard(d) {
 
 function fleetStatus(a) {
   if (a.status === "airborne") return [typeof a.alt === "number" ? (a.alt >= 18000 ? "FL" + Math.round(a.alt / 100) : String(Math.round(a.alt / 100) * 100)) : "---", "AIRBORNE", "y"];
-  if (a.status === "ground") return ["GND", "ON GROUND", "g"];
+  if (a.status === "ground" && a.live) return ["GND", "ON GROUND", "g"];
+  if (a.status === "ground") return ["GND", "PARKED", "m"];
   return ["---", "NO SIGNAL", "m"];
 }
 
@@ -691,11 +736,12 @@ function renderWatchersBoard(d) {
     const rows = sorted.map((a) => {
       const k = `ac:${w.topic}:${a.ident}`;
       const [alt, status, sc] = fleetStatus(a);
-      const link = mapLink(a.hex);
+      const link = mapLink(a);
       const bits = [a.label ? `<b>${esc(a.label)}</b>` : "", a.kind === "flight" && a.reg ? `flown by ${esc(a.reg)}` : "",
         a.type ? esc(a.type) : "", a.status === "airborne" && a.gs ? `${Math.round(a.gs)} kt` : "",
-        a.status !== "airborne" && a.status !== "ground" && a.last_seen ? `seen ${ago(a.last_seen)}` : "",
+        !a.live && a.last_seen ? esc(`seen ${ago(a.last_seen)}${a.where ? " " + a.where : ""}`) : "",
         a.expires ? `<span class="o">stops ${until(a.expires)}</span>` : "",
+        a.live && a.where ? esc(a.where) : "",
         link ? `<a href="${link}" target="_blank" rel="noopener noreferrer">live map ↗</a>` : "",
         `<button type="button" class="linkbtn" data-act="edit-aircraft" data-topic="${esc(w.topic)}" data-ident="${esc(a.ident)}">edit</button>`].filter(Boolean);
       return `<div class="flap-row cols-fleet">${flaps(k + ":id", a.ident, 7)}${flaps(k + ":alt", alt, 5, sc === "y" ? "y" : "")}${flaps(k + ":s", status, 9, sc)}</div>
@@ -812,19 +858,29 @@ const watcherOptions = () => LAST.watchers.map((w) => [w.topic, w.name]);
 const slug = (s) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 const localDate = (t) => new Intl.DateTimeFormat("en-CA", {timeZone: TZ}).format(t * 1000);
 
-function tripForm(t) {
+function tripForm(t, pre, intro) {
   const inb = (t && t.inbound) || {};
   const adb = LAST.settings.aerodatabox;
-  const partner = t ? partnerOf(t) : null;
-  const canAddReturn = !t || (t.leg !== "return" && !partner);
+  const others = t ? othersOf(t) : [];
+  const canAddReturn = !t || !hasReturn(t);
+  const canConnect = !t || !t.connect_to;
+  const connFields = (prefix, label, hint) => [
+    {type: "heading", label, hint},
+    [{name: prefix + "flight", label: "Connecting flight", placeholder: "UA567"},
+     {name: prefix + "time", label: "Departs", type: "time", hint: adb ? "Optional with AeroDataBox" : "Local time where it leaves"}],
+    {name: prefix + "plane", label: "Plane flying in", placeholder: "N12345 or UA890", hint: adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the connection)."},
+  ];
   const fields = [
+    ...(intro ? [intro] : []),
     ...(t ? [] : [{name: "topic", label: "For", type: "select", options: watcherOptions()}]),
     [{name: "flight", label: "Your flight", value: t ? t.flight : "", placeholder: "UA1234", required: true},
      {name: "date", label: "Date", type: "date", value: t ? t.date : localDate(NOW)}],
     [{name: "time", label: "Departs", type: "time", value: t && t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", hint: adb && !t ? "Optional with AeroDataBox" : "Local time where it leaves"},
      {name: "airport", label: "From airport", value: t ? apt(t.dep_airport) : "", placeholder: "IAD", hint: "Optional"}],
+    {name: "to", label: "Getting off at", value: t ? apt(t.get_off) : "", placeholder: "DEN", hint: "Optional: only for a flight that stops on the way and you get off early"},
     {name: "plane", label: "Plane flying in", value: inb.tail || inb.flight || "", placeholder: "N38473 or UA567",
      hint: adb ? "Leave blank and AeroDataBox finds it. See ? Help → Trips." : "From your airline app's \"Where's my plane?\" screen. See ? Help → Trips."},
+    ...(canConnect ? connFields("conn_", "Connecting flight", "Optional: the next flight after this one. I'll tell you how long you'll have to make it.") : []),
     ...(canAddReturn ? [
       {type: "heading", label: "Return flight", hint: "Optional: your flight home, tracked as part of the same trip."},
       [{name: "ret_flight", label: "Return flight", placeholder: "UA5678"},
@@ -832,15 +888,17 @@ function tripForm(t) {
       [{name: "ret_time", label: "Departs", type: "time", hint: adb ? "Optional with AeroDataBox" : "Local time where it leaves"},
        {name: "ret_airport", label: "From airport", placeholder: "LAS", hint: "Blank: where you land"}],
       {name: "ret_plane", label: "Plane flying in", placeholder: "N12345 or UA567", hint: adb ? "Leave blank and AeroDataBox finds it." : "Fill in nearer the day (Edit the return)."},
+      ...(t ? [] : connFields("ret_conn_", "Return connection", "Optional: the next flight after the return.")),
     ] : []),
     {name: "share", label: "Share with", type: "checks", value: t ? t.shared_with : [],
      options: LAST.watchers.filter((w) => !t || w.topic !== t.topic).map((w) => [w.topic, w.name]),
-     hint: partner ? `Covers both flights (${t.flight} and ${partner.flight}). They get each flight's departure and landing, nothing else.`
+     hint: others.length ? `Covers every flight of this trip (${[t, ...others].map((x) => x.flight).join(", ")}). They get each flight's departure and landing, nothing else.`
        : "They get your flight's departure and landing, nothing else."},
   ];
-  if (!t) return openForm({title: "Add trip", fields, saveLabel: "Add trip",
+  if (pre) for (const f of fields.flat()) if (f.name && f.name in pre) f.value = pre[f.name];
+  if (!t) return openForm({title: pre ? "Check your imported trip" : "Add trip", fields, saveLabel: "Add trip",
     save: (v) => api("api/trip", {op: "add", ...v, share: (v.share || []).filter((x) => x !== v.topic)})});
-  const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", airport: apt(t.dep_airport), plane: inb.tail || inb.flight || ""};
+  const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", airport: apt(t.dep_airport), to: apt(t.get_off), plane: inb.tail || inb.flight || ""};
   openForm({title: `Edit ${t.flight} · ${t.watcher}`, fields,
     save: (v) => {
       const {share = [], ...rest} = v;
@@ -849,11 +907,48 @@ function tripForm(t) {
       if (!Object.keys(changes).length && !shareChanged) return Promise.resolve({ok: true, message: "Nothing changed."});
       return api("api/trip", {op: "change", topic: t.topic, number: t.number, ...changes, ...(shareChanged ? {share} : {})});
     },
-    remove: partner
-      ? {label: "Cancel both", confirm: `Stop tracking ${t.flight} and ${partner.flight}?`, run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number})}
+    remove: others.length
+      ? {label: others.length > 1 ? "Cancel all" : "Cancel both", confirm: `Stop tracking ${[t, ...others].map((x) => x.flight).join(", ")}?`, run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number})}
       : {label: "Cancel trip", confirm: `Stop tracking ${t.flight}?`, run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number})},
-    remove2: partner ? {label: `Cancel ${t.flight}`, confirm: `Stop tracking ${t.flight} and keep ${partner.flight}?`,
+    remove2: others.length ? {label: `Cancel ${t.flight}`, confirm: `Stop tracking ${t.flight} and keep ${others.map((x) => x.flight).join(", ")}?`,
       run: () => api("api/trip", {op: "cancel", topic: t.topic, number: t.number, only: true})} : null});
+}
+
+/** Import: paste a confirmation or pick a saved email / calendar file; TailWatcher pre-fills Add trip to check. */
+function importForm() {
+  const form = $("dlg-form");
+  let file = null;
+  form.innerHTML = `<h3 id="dlg-title">Import a trip</h3>
+    <p class="muted">Paste your booking confirmation, or choose a saved email (.eml) or calendar file (.ics). I'll fill in the Add trip form for you to check.
+      PDFs and screenshots can't be read: open them, copy the text and paste it here. <button type="button" class="linkbtn help-link" data-act="help" data-section="importing-a-trip">? Help</button></p>
+    <label class="field" for="imp-text">Confirmation text<textarea id="imp-text" placeholder="Paste the email or itinerary here" spellcheck="false"></textarea></label>
+    <label class="field" for="imp-file">Or a file<input type="file" id="imp-file" accept=".eml,.ics,.txt,.html,.htm,message/rfc822,text/calendar,text/plain,text/html"><small>Saved emails (.eml), calendar files (.ics), web pages (.html) and text (.txt)</small></label>
+    <div class="form-error" id="dlg-err" role="alert"></div>
+    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Close</button><button type="submit" class="btn primary">Read it</button></div>`;
+  $("imp-file").onchange = (e) => { file = e.target.files[0] || null; $("dlg-err").textContent = ""; };
+  form.oninput = () => { $("dlg-err").textContent = ""; };
+  $("dlg-cancel").onclick = () => $("dlg").close();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    let text = $("imp-text").value, name = "";
+    if (file) {
+      name = file.name;
+      if (file.size > 3 * 1024 * 1024) { $("dlg-err").textContent = "That file is too big to be a confirmation (over 3 MB)."; return; }
+      text = /\.(pdf|png|jpe?g|heic|gif|webp|docx?|pages)$/i.test(name) ? "" : await file.text();
+    }
+    const btn = form.querySelector("[type=submit]");
+    btn.disabled = true; btn.textContent = "Reading…";
+    const r = await api("api/import", {text, name});
+    btn.disabled = false; btn.textContent = "Read it";
+    if (!r.ok) { $("dlg-err").textContent = r.message; return; }
+    const day = (d) => d ? new Date(d + "T12:00:00Z").toLocaleDateString(undefined, {weekday: "short", month: "short", day: "numeric", timeZone: "UTC"}) : "date?";
+    const found = r.flights.map((f) => `${f.flight} ${day(f.date)}${f.time ? " " + f.time : ""}${f.dep ? " " + f.dep : ""}${f.arr ? "→" + f.arr : ""}`);
+    $("dlg").close();
+    tripForm(null, r.form, {type: "heading", label: `${r.message} Check every field before adding.`,
+      hint: [...found, ...r.notes].join("\n")});
+  };
+  $("dlg").showModal();
+  if (matchMedia("(hover: hover)").matches) $("imp-text").focus();
 }
 
 function watcherForm(w) {
@@ -1233,10 +1328,14 @@ function onAction(btn) {
     if (!LAST.watchers.length) return toast("Add a watcher first.");
     return tripForm(null);
   }
+  if (act === "import-trip") {
+    if (!LAST.watchers.length) return toast("Add a watcher first.");
+    return importForm();
+  }
   if (act === "edit-trip" && t) return tripForm(t);
   if (act === "cancel-trip" && t) {
-    const p = partnerOf(t);
-    if (confirm(p ? `Stop tracking ${t.flight} and ${p.flight}? (To keep one, use Edit.)` : `Stop tracking ${t.flight}?`)) api("api/trip", {op: "cancel", topic, number: t.number}).then((r) => { toast(r.message); load(); });
+    const p = othersOf(t);
+    if (confirm(p.length ? `Stop tracking ${[t, ...p].map((x) => x.flight).join(", ")}? (To keep some, use Edit.)` : `Stop tracking ${t.flight}?`)) api("api/trip", {op: "cancel", topic, number: t.number}).then((r) => { toast(r.message); load(); });
     return;
   }
   if (act === "add-watcher") return watcherForm(null);

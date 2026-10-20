@@ -32,6 +32,7 @@ import edits
 import flights
 import history
 import invites
+import itinerary
 import lookup
 import ntfy_admin
 import trips
@@ -42,7 +43,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.16.0"
+VERSION = "0.18.0"
 USER_AGENT = f"TailWatcher/{VERSION} (+https://github.com/RogerUp-Labs/tailwatcher)"
 
 DATA_SOURCES = {
@@ -163,6 +164,7 @@ class Airports:
         self.coords = {}  # ident -> (lat, lon, name)
         self.iata = {}    # "IAD" -> "KIAD"
         self.tz = {}      # ident -> "America/New_York"
+        self.towns = []   # (lat, lon, "Denver, CO") from medium/large airports' cities
         try:
             with open(path, newline="") as f:
                 for r in csv.DictReader(f):
@@ -173,6 +175,9 @@ class Airports:
                         self.iata.setdefault(r["iata"], r["ident"])
                     if r.get("tz"):
                         self.tz[r["ident"]] = r["tz"]
+                    if r.get("city") and r.get("size") in ("m", "l"):
+                        town = f"{r['city']}, {r['region']}" if r.get("region") else r["city"]
+                        self.towns.append((lat, lon, town))
         except (OSError, KeyError, ValueError) as e:
             log.warning("airport database unavailable (%s)", e)
 
@@ -185,6 +190,45 @@ class Airports:
             if d < best_d:
                 best, best_d = (ident, name), d
         return (best[0], best[1], best_d) if best else None
+
+
+    def town(self, lat, lon, max_nm=300):
+        """Nearest city with a sizeable airport: (town, distance_nm, bearing) or None."""
+        best, best_d = None, max_nm
+        for alat, alon, name in self.towns:
+            if abs(alat - lat) > max_nm / 60:
+                continue
+            d = haversine_nm(alat, alon, lat, lon)
+            if d < best_d:
+                best, best_d = (name, alat, alon), d
+        return (best[0], best_d, bearing(best[1], best[2], lat, lon)) if best else None
+
+    def place(self, lat, lon, on_ground=False):
+        """Plain-text approximate location for the dashboard: "at KFDK – Frederick
+        Municipal Airport", "near Denver, CO", "40 nm NE of Denver, CO", or
+        coordinates when nothing is near (oceans, or no airport data)."""
+        if lat is None or lon is None:
+            return None
+        if on_ground:
+            apt = self.nearest(lat, lon, 3)
+            if apt:
+                return f"at {apt[0]} – {apt[1]}"
+        town = self.town(lat, lon)
+        if town:
+            name, d, brg = town
+            return f"near {name}" if d < 15 else f"{d:.0f} nm {COMPASS[round(brg / 45) % 8]} of {name}"
+        return f"{abs(lat):.1f}°{'N' if lat >= 0 else 'S'} {abs(lon):.1f}°{'E' if lon >= 0 else 'W'}"
+
+
+COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def bearing(lat1, lon1, lat2, lon2):
+    """Initial bearing in degrees from point 1 to point 2."""
+    p1, p2, dl = math.radians(lat1), math.radians(lat2), math.radians(lon2 - lon1)
+    x = math.sin(dl) * math.cos(p2)
+    y = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return math.degrees(math.atan2(x, y)) % 360
 
 
 def haversine_nm(lat1, lon1, lat2, lon2):
@@ -516,32 +560,32 @@ def run():
         return None, None
 
     def on_inbound(topic, text):
-        """Answer "inbound UA1234 [N38473] [dep 4:30pm] [return UA5678 11/21 …]"
-        by starting a trip (or both flights of a round trip)."""
+        """Answer "inbound UA1234 [N38473] [dep 4:30pm] [then UA567 …] [return UA5678 11/21 …]"
+        by starting a trip (or every flight of a journey)."""
         now = time.time()
-        parsed = trips.parse_itinerary(text, now, cfg["time_zone"], airports)
-        if isinstance(parsed, str):
-            return parsed
-        trip, ret = parsed
-        trip["topic"] = topic
-        err, note = look_up_new(trip, now)
-        if err:
-            return err
-        if ret is None:
-            trips.add(trip)
-            wake.set()  # poll the plane right away
-            return note or trips.describe(trip, cfg["time_zone"])
-        ret["topic"] = topic
-        ret["dep_airport"] = ret["dep_airport"] or trip.get("arr_airport")
-        if cfg["adb_key"] and not ret["inbound"]:
-            time.sleep(1.1)  # free tier allows 1 request per second
-        ret_err, ret_note = look_up_new(ret, now)
-        if ret_err:
-            return trips.about_return(ret_err)
-        trips.add_journey(trip, ret)
-        wake.set()
-        return (note or trips.describe(trip, cfg["time_zone"])) + "\n\n" \
-            + (ret_note or trips.describe(ret, cfg["time_zone"]))
+        legs = trips.parse_itinerary(text, now, cfg["time_zone"], airports)
+        if isinstance(legs, str):
+            return legs
+        replies = []
+        for n, trip in enumerate(legs):
+            trip["topic"] = topic
+            if n:
+                # A connection or the flight home leaves from where the one before lands.
+                trip["dep_airport"] = trip["dep_airport"] or legs[n - 1].get("arr_airport")
+                if cfg["adb_key"] and not trip["inbound"]:
+                    time.sleep(1.1)  # free tier allows 1 request per second
+            err, note = look_up_new(trip, now)
+            if err:
+                first_back = trip["leg"] == "return" and legs[n - 1]["leg"] != "return"
+                return err if not n else trips.about_return(err) if first_back else trips.about_leg(err, "Connection")
+            prev = legs[n - 1] if n and legs[n - 1]["leg"] == trip["leg"] else None
+            replies.append(note or trips.describe(trip, cfg["time_zone"], prev=prev))
+        if len(legs) == 1:
+            trips.add(legs[0])
+        else:
+            trips.add_journey(legs)
+        wake.set()  # poll the plane right away
+        return "\n\n".join(replies)
 
     def on_return(topic, text):
         """Answer "return 1 UA5678 11/21 …" by adding the flight home to trip 1."""
@@ -550,10 +594,11 @@ def run():
         out, rest = trips.select(mine, text, now, cfg["time_zone"])
         if out is None:
             return rest
-        if out.get("leg") == "return" or len(trips.journey(out, mine)) > 1:
+        legs = trips.journey(out, mine)
+        if trips.is_round_trip(legs):
             return (f"🤷 {out['flight']} already has a return flight. Change it with \"change …\" "
                     "(send \"trips\" for the numbers).")
-        ret = trips.parse_return(out, rest, now, cfg["time_zone"], airports)
+        ret = trips.parse_return(legs[-1], rest, now, cfg["time_zone"], airports)
         if isinstance(ret, str):
             return ret
         ret["topic"] = topic
@@ -567,6 +612,34 @@ def run():
             announce_share({t: [ret] for t in ret["shared_with"]}, topic)
         wake.set()
         return f"↩ Added the flight home to {out['flight']}.\n" + (note or trips.describe(ret, cfg["time_zone"]))
+
+    def on_connect(topic, text):
+        """Answer "connect 1 UA567 [dep 2:10pm] …" by adding a connecting flight after trip 1."""
+        now = time.time()
+        mine = trips.for_topic(topic)
+        prev, rest = trips.select(mine, text, now, cfg["time_zone"])
+        if prev is None:
+            return rest
+        nxt = trips.connects_to(prev, mine)
+        if nxt:
+            number = next(i for i, x in enumerate(mine, 1) if x is nxt)
+            return (f"🤷 {prev['flight']} already connects to {nxt['flight']}. To add a flight after that one, "
+                    f"send \"connect {number} …\".")
+        conn = trips.parse_connection(prev, rest, now, cfg["time_zone"], airports)
+        if isinstance(conn, str):
+            return conn
+        conn["topic"] = topic
+        err, note = look_up_new(conn, now)
+        if err:
+            return trips.about_leg(err, "Connection")
+        stored = trips.attach(prev, conn, True)
+        if stored is None:
+            return f"🤷 {prev['flight']} is no longer on your trips."
+        if conn["shared_with"]:
+            announce_share({t: [conn] for t in conn["shared_with"]}, topic)
+        wake.set()
+        return (f"🔗 Added {conn['flight']} as your connection after {prev['flight']}.\n"
+                + (note or trips.describe(conn, cfg["time_zone"], prev=stored)))
 
     def adb_refresh(trip, now):
         """Look a trip up on AeroDataBox right away (when added or changed): a
@@ -592,9 +665,12 @@ def run():
 
     def on_cancel(legs, rest):
         tz = cfg["time_zone"]
-        if len(legs) > 1:
+        if len(legs) == 2 and trips.is_round_trip(legs):
             return (f"🗑 Stopped tracking {legs[0]['flight']} on {trips.fmt_day(legs[0], tz)} and the "
                     f"return {legs[1]['flight']} on {trips.fmt_day(legs[1], tz)}."), False
+        if len(legs) > 1:
+            names = [f"{t['flight']} ({trips.fmt_day(t, tz)})" for t in legs]
+            return f"🗑 Stopped tracking {', '.join(names[:-1])} and {names[-1]}.", False
         return f"🗑 Stopped tracking {legs[0]['flight']} on {trips.fmt_day(legs[0], tz)}.", False
 
     def announce_share(added, owner_topic):
@@ -652,7 +728,7 @@ def run():
     def on_command(topic, text):
         hist.add("in", topic, text, kind="command", status="received")
         verb, ident, _, _ = commands.parse(text)
-        if verb in ("inbound", "return", "trips", "cancel", "change", "share", "unshare"):
+        if verb in ("inbound", "return", "connect", "trips", "cancel", "change", "share", "unshare"):
             if not any(w["topic"] == topic for w in cfg["watchers"]):
                 return
             now = time.time()
@@ -660,6 +736,8 @@ def run():
                 reply = on_inbound(topic, ident)
             elif verb == "return":
                 reply = on_return(topic, ident)
+            elif verb == "connect":
+                reply = on_connect(topic, ident)
             elif verb == "trips":
                 reply = trips.describe_all(trips.for_topic(topic), cfg["time_zone"])
             elif verb == "change":
@@ -730,7 +808,8 @@ def run():
 
     def trip_poll_keys():
         """The trips' planes to include in this cycle's batched poll: inbound
-        planes in their last day, and your own flight around departure if shared."""
+        planes in their last day, and your own flight around departure if shared
+        or followed by a connection."""
         topics, now = {w["topic"] for w in cfg["watchers"]}, time.time()
         with trips.TRIPS_LOCK:
             all_trips = trips.load()
@@ -740,7 +819,7 @@ def run():
                 continue
             if not t.get("landed") and trips.is_live(t, now) and trips.inbound_key(t):
                 keys.add(trips.inbound_key(t))
-            if trips.own_live(t, now):
+            if trips.own_live(t, now, trips.connects_to(t, all_trips) is not None):
                 keys.add(("flight", t["callsign"]))
         return keys
 
@@ -772,11 +851,12 @@ def run():
             active = [t for t in all_trips if trips.expires_at(t) > now and t.get("topic") in by_topic]
             changed = len(active) != len(all_trips)
             for t in active:
-                if t.get("leg") == "return" and not t.get("dep_airport"):
-                    # The flight home leaves from where the outbound lands, once AeroDataBox says where.
-                    out = trips.journey(t, active)[0]
-                    if out is not t and out.get("arr_airport"):
-                        t["dep_airport"], changed = out["arr_airport"], True
+                if t.get("itinerary") and not t.get("dep_airport"):
+                    # A connection (or the flight home) leaves from where the flight
+                    # before it lands, once AeroDataBox says where.
+                    before = trips.prev_leg(t, active)
+                    if before and before.get("arr_airport"):
+                        t["dep_airport"], changed = before["arr_airport"], True
             for t in active:
                 level = trips.check_level(t, now) if cfg["adb_key"] else None
                 if not level:
@@ -798,9 +878,14 @@ def run():
                 owner = by_topic[t["topic"]]["name"]
                 for m in trips.share_note_messages(t, notes, owner, cfg["time_zone"]):
                     to_shared(t, *m)
+            for t in active:
+                nxt = trips.connects_to(t, active)
+                for m in trips.connection_notes(t, nxt, cfg["time_zone"]) if nxt else []:
+                    changed = True
+                    to_owner(t, *m)
 
             live = [t for t in active if not t.get("landed") and trips.is_live(t, now)]
-            own = [t for t in active if trips.own_live(t, now)]
+            own = [t for t in active if trips.own_live(t, now, trips.connects_to(t, active) is not None)]
             for t in live:
                 k = trips.inbound_key(t)
                 if not k or k[1] not in fixes:
@@ -819,21 +904,26 @@ def run():
                 st, event = observe(t.get("own") or {}, fix, now)
                 if fix is not None:
                     st["last_fix"] = {k: fix.get(k) for k in ("lat", "lon", "alt_baro", "gs", "track", "t", "flight", "r", "hex")}
-                t["own"], sent = st, t.setdefault("own_sent", {})
-                changed = True
-                kind = ("departed" if event in ("departed", "airborne") and not sent.get("departed")
-                        else "landed" if event in ("landed", "lost_low") and sent.get("departed") and not sent.get("landed")
-                        else None)
+                t["own"], changed = st, True
+                ac = fix or {**(st.get("last_fix") or {}), "hex": st.get("hex")}
+                kind = trips.own_event(t, event, ac, airports)
+                nxt = trips.connects_to(t, active)
+                if nxt:
+                    for m in trips.connection_step(t, nxt, fix, kind, now, airports, cfg["time_zone"]):
+                        to_owner(t, *m, hexcode=st.get("hex"))
                 if not kind:
                     continue
-                sent[kind] = True
                 owner = by_topic[t["topic"]]["name"]
-                ac = fix or {**(st.get("last_fix") or {}), "hex": st.get("hex")}
                 alert = event if kind == "landed" else ("departed" if event == "departed" else "airborne")
                 for topic in t.get("shared_with") or []:
                     if topic in by_topic:
-                        outgoing.append(build_message(cfg, by_topic[topic], t["flight"], f"{owner}'s flight",
-                                                      ac, alert, airports, "flight"))
+                        msg = build_message(cfg, by_topic[topic], t["flight"], f"{owner}'s flight",
+                                            ac, alert, airports, "flight")
+                        if kind == "landed" and nxt:
+                            msg["message"] += f"\nConnecting to {nxt['flight']}" + (
+                                f", departs {trips.fmt_time(nxt['dep_time'], cfg['time_zone'])}"
+                                if nxt.get("dep_time") else "") + "."
+                        outgoing.append(msg)
             if changed:
                 trips.save(active)
 
@@ -859,7 +949,11 @@ def run():
                 aircraft.append({
                     "ident": a["tail"], "kind": a["kind"], "label": a["label"], "expires": a["expires"],
                     "status": s_.get("status") or "unknown", "last_seen": s_.get("last_seen"),
+                    # Transponders go quiet once a plane parks, so a stored "ground"
+                    # never changes until it flies again; only a recent fix is live.
+                    "live": now - (s_.get("last_seen") or 0) <= GAP_SECONDS,
                     "hex": s_.get("hex"), "alt": fix.get("alt_baro"), "gs": fix.get("gs"),
+                    "where": airports.place(fix.get("lat"), fix.get("lon"), fix.get("alt_baro") == "ground"),
                     "callsign": (fix.get("flight") or "").strip(), "type": fix.get("t"), "reg": fix.get("r")})
             watchers_out.append({"name": w["name"], "topic": w["topic"], "priority": w["priority"],
                                  "notify_landing": w["notify_landing"], "aircraft": aircraft, "following": []})
@@ -879,10 +973,15 @@ def run():
         for topic, name in names.items():
             mine = trips.ordered([t for t in all_trips if t.get("topic") == topic])
             for n, t in enumerate(mine, 1):
+                before, after = trips.connects_from(t, mine), trips.connects_to(t, mine)
                 trips_out.append({**{k: t.get(k) for k in (
                     "flight", "date", "dep_time", "dep_airport", "arr_airport", "inbound", "source",
                     "departed", "landed", "eta_sent", "tight", "late", "missing", "replacement",
-                    "last_check", "plane_locked", "itinerary", "leg")},
+                    "last_check", "plane_locked", "itinerary", "leg", "seq", "arr_time", "stops", "route", "get_off")},
+                    "connect_from": before["flight"] if before else None,
+                    "connect_at": before.get("arr_airport") if before else None,
+                    "connect_min": trips.connection_minutes(before, t) if before else None,
+                    "connect_to": after["flight"] if after else None,
                     "topic": topic, "watcher": name, "number": n, "live": trips.is_live(t, now),
                     "dep_tz": trips.airport_zone(t.get("dep_airport"), airports, cur["time_zone"]),
                     "shared_with": [x for x in (t.get("shared_with") or []) if x in names],
@@ -922,6 +1021,8 @@ def run():
             parts += ["dep", val("time")]
         if val("airport"):
             parts += ["from", val("airport")]
+        if val("to"):
+            parts += ["to", val("to")]
         return " ".join(p for p in parts if p)
 
     def ntfy_post(path, data):
@@ -995,6 +1096,10 @@ def run():
             return ntfy_post(path, data)
         if path == "/api/invite":
             return invite_post(data)
+        if path == "/api/import":  # read only: it pre-fills the Add trip form, nothing is saved
+            found = itinerary.preview(str(data.get("text") or ""), str(data.get("name") or ""),
+                                      time.time(), load_config()["time_zone"], airports)
+            return (200 if found["ok"] else 400), found
         topic = str(data.get("topic") or "")
         op = data.get("op")
         names = {w["topic"]: w["name"] for w in load_config()["watchers"]}  # fresh: see snapshot()
@@ -1025,8 +1130,12 @@ def run():
                 if share is not None and not isinstance(share, list):
                     return 400, {"ok": False, "message": "Bad request."}
                 has_return = bool(str(data.get("ret_flight") or "").strip())
+                has = lambda prefix: bool(str(data.get(prefix + "flight") or "").strip())  # noqa: E731
                 if op == "add":
-                    text = trip_text(data) + (" return " + trip_text(data, prefix="ret_") if has_return else "")
+                    text = trip_text(data) + (" then " + trip_text(data, prefix="conn_") if has("conn_") else "")
+                    if has_return:
+                        text += " return " + trip_text(data, prefix="ret_") \
+                            + (" then " + trip_text(data, prefix="ret_conn_") if has("ret_conn_") else "")
                     msg = on_inbound(topic, text)
                     if share and not msg.startswith(("❌", "🤔", "Tell me your flight")):
                         flight = flights.parse_flight(str(data.get("flight") or ""))
@@ -1042,11 +1151,16 @@ def run():
                         msg = on_return(topic, f"{number} {trip_text(data, prefix='ret_')}")
                         if msg.startswith(("❌", "🤔", "🤷")):
                             return 400, {"ok": False, "message": msg}
+                    if has("conn_"):  # nor does adding a connection after it
+                        added = on_connect(topic, f"{number} {trip_text(data, prefix='conn_')}")
+                        if added.startswith(("❌", "🤔", "🤷")):
+                            return 400, {"ok": False, "message": f"{added}\n(The return flight was added.)" if msg else added}
+                        msg = f"{msg}\n{added}".strip()
                     edits_text = trip_text(data, number)
                     if edits_text != str(number):
                         changed = trips.modify(topic, edits_text, on_change, now, cfg["time_zone"])
                         if msg and changed.startswith(("❌", "🤔", "🤷", "Which trip", "You have ")):
-                            return 400, {"ok": False, "message": f"{changed}\n(The return flight was added.)"}
+                            return 400, {"ok": False, "message": f"{changed}\n(The new flight was added.)"}
                         msg = f"{msg}\n{changed}".strip()
                     if share is not None and not msg.startswith(("🤔", "🤷", "❌")):
                         shared = set_share(topic, str(number), [str(x) for x in share])
