@@ -77,14 +77,26 @@ def active(now=None, path=None):
     return [i for i in load(path) if i.get("expires", 0) > now]
 
 
-def links(topic, phone_url):
-    """(ntfy:// app link, https web link, host) for a topic, or (None, None, None)."""
+def display_name(watcher_name):
+    """The subscription name the ntfy Android app shows instead of the tw-… topic."""
+    return f"TailWatcher · {watcher_name}" if watcher_name else "TailWatcher"
+
+
+def links(topic, phone_url, name=None):
+    """(ntfy:// app link, https web link, host) for a topic, or (None, None, None).
+
+    The app link carries ?display= so the ntfy Android app names the new
+    subscription after the watcher. Only Android reads it, and only when it
+    subscribes; the iPhone app has no display names."""
     base = (phone_url or "").rstrip("/")
     if not base:
         return None, None, None
     u = urllib.parse.urlparse(base)
     path = u.path.rstrip("/")
-    app = f"ntfy://{u.netloc}{path}/{urllib.parse.quote(topic)}" + ("" if u.scheme == "https" else "?secure=false")
+    query = {"display": display_name(name)}
+    if u.scheme != "https":
+        query["secure"] = "false"
+    app = f"ntfy://{u.netloc}{path}/{urllib.parse.quote(topic)}?" + urllib.parse.urlencode(query, quote_via=urllib.parse.quote)
     return app, f"{base}/{urllib.parse.quote(topic)}", u.netloc
 
 
@@ -132,7 +144,7 @@ Ask the person who sent it for a new one.</p>""")
 
 def join_page(invite, watcher_name, phone_url, server_mode="public", phone_mode="open", tz=None):
     e = html.escape
-    app, web, host = links(invite["topic"], phone_url)
+    app, web, host = links(invite["topic"], phone_url, watcher_name)
     sender = invite.get("from") or ""
     title = f"{sender} invited you to flight alerts" if sender else "You're invited to flight alerts"
     dt = datetime.datetime.fromtimestamp(invite["expires"], tz)
@@ -148,7 +160,8 @@ def join_page(invite, watcher_name, phone_url, server_mode="public", phone_mode=
                      f"Let {e(sender or 'whoever invited you')} know; it's a setting on their server.</p>")
     if app:
         subscribe = f"""<a class="btn primary" href="{e(app)}">Subscribe in ntfy</a>
-<p class="small">Opens the ntfy app with your alerts ready. Tap <b>Subscribe</b> there.</p>
+<p class="small">Opens the ntfy app with your alerts ready. Tap <b>Subscribe</b> there.
+On Android it's listed as <b>{e(display_name(watcher_name))}</b>.</p>
 <details><summary>It didn't open?</summary>
 <p class="small">Open <a href="{e(web)}" rel="noreferrer">{e(web)}</a>, or in the ntfy app tap <b>+</b>,
 turn on <b>Use another server</b>, and enter server <code>{e(host)}</code> and topic <code>{e(invite['topic'])}</code>.</p>{cert_note}</details>"""
@@ -170,6 +183,8 @@ Two quick steps on your phone.</p>
 <li><b>Landed:</b> it's on the ground.</li>
 <li><b>📣 Shared a flight with you:</b> someone added you to their trip; you'll get its departure and landing.</li>
 <li>You can type in the app to manage your list: a tail or flight number (<code>N12345</code>, <code>UA1234 for 2 days</code>) to follow it, <code>list</code> to see it, <code>help</code> for more.</li>
+<li>On iPhone the app lists it by its server and topic, a long random name; the iPhone app can't rename it,
+but every alert says what it's about. On Android, rename it any time: open it, then ⋮ → <b>Subscription settings</b> → <b>Display name</b>.</li>
 <li>On Android, set the ntfy app's battery use to <b>Unrestricted</b> so alerts arrive on time.</li>
 </ul></section>
 <footer>This invite works until {e(when)}. Keep it to yourself: anyone with it can read these alerts.</footer>

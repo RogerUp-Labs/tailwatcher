@@ -1092,20 +1092,21 @@ function aircraftForm(w, a) {
       run: () => api("api/aircraft", {op: "remove", topic: w.topic, ident: a.ident})} : null});
 }
 
-function connectInfo(w, topic = w.topic) {
+function connectInfo(w, topic = w.topic, label = w.name) {
   const s = LAST.settings;
   const base = (s.phone_url || "").replace(/\/+$/, "");
   if (!base) return null;
   const u = new URL(base);
   const secure = u.protocol === "https:";
-  const app = `ntfy://${u.host}${u.pathname.replace(/\/$/, "")}/${encodeURIComponent(topic)}${secure ? "" : "?secure=false"}`;
+  // display= names the subscription in the ntfy Android app (invites.display_name() does the same)
+  const app = `ntfy://${u.host}${u.pathname.replace(/\/$/, "")}/${encodeURIComponent(topic)}?display=${encodeURIComponent(`TailWatcher · ${label}`)}${secure ? "" : "&secure=false"}`;
   const web = `${base}/${encodeURIComponent(topic)}`;
   return {app, web, host: u.host};
 }
 
 function connectPhone(w) {
   const info = connectInfo(w), local = LAST.settings.ntfy_server === "local";
-  const planes = w.planes_topic ? connectInfo(w, w.planes_topic) : null;
+  const planes = w.planes_topic ? connectInfo(w, w.planes_topic, `${w.name} planes`) : null;
   const form = $("dlg-form");
   const message = info ? `Get flight alerts from TailWatcher: install the free ntfy app, then tap this link on your phone: ${info.app}` : "";
   let sender = "";
@@ -1138,6 +1139,7 @@ function connectPhone(w) {
           <button type="button" class="btn primary" id="cp-share">Send link</button>
           <button type="button" class="btn" id="cp-copy">Copy link</button>
         </div>
+        <div class="note">On Android it's listed as <b>TailWatcher · ${esc(w.name)}</b>. The iPhone app can't rename subscriptions, so there it shows the server and topic. <button type="button" class="linkbtn help-link" data-act="help" data-section="the-ntfy-app-shows-a-long-random-topic-name">More</button></div>
         <div class="note">No app link support? Open <a href="${esc(info.web)}" target="_blank" rel="noopener noreferrer">${esc(info.web)}</a>, or in the app tap + and enter server <b>${esc(info.host)}</b> and topic <b>${esc(w.topic)}</b>.</div>
         ${LAST.settings.ntfy_server !== "public" ? `<div class="note">Certificate error in the ntfy app ("Trust anchor … not found")? Their phone doesn't trust your server's https certificate yet. <button type="button" class="linkbtn help-link" data-act="help" data-section="the-ntfy-app-says-trust-anchor-for-certification-path-not-found">How to fix it</button></div>` : ""}</li>`
       : `<li>In the ntfy app, tap +, turn on "Use another server", enter your NTFY's address, and subscribe to <b>${esc(w.topic)}</b>.
