@@ -229,6 +229,14 @@ This (or another certificate error, such as "certificate not trusted") means the
 
 The invite page itself can show a browser warning for the same reason if TailWatcher's public address is a StartTunnel IP; a public domain fixes that too.
 
+### The ntfy app says "not authorized" (HTTP 401 or 403)
+
+This only happens with your own NTFY. Check these in order:
+
+- **An old login saved in the app.** A wrong or outdated login is refused even on topics anyone can open. In the ntfy app, open **Settings → Manage users** and delete any user listed for your NTFY's address, then subscribe again.
+- **An old topic.** Phones without a login can only open topics starting with `tw-`. Watchers made by older versions have `tailwatcher_…` topics: **Edit** the watcher, tick **Give them a new topic**, and send a fresh **Connect phone** link.
+- **Logins per person.** If **⚙ Settings** has phones connect with one NTFY login per person, they need theirs from **Connect phone → Create NTFY login**, added in the app under **Settings → Manage users**.
+
 ### Someone says their invite link has expired
 
 Invites work for the number of days you picked. Open **Connect phone** for that person and create a new one.
