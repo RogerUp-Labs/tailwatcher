@@ -37,19 +37,30 @@ class InviteTest(unittest.TestCase):
     def test_join_page_links_and_escaping(self):
         inv = {"token": "t" * 24, "topic": "tw-dad-abc", "from": "<b>Sam</b>", "expires": NOW, "kind": "watcher"}
         page = invites.join_page(inv, "Dad <script>", "https://ntfy.sh")
-        self.assertIn('href="ntfy://ntfy.sh/tw-dad-abc"', page)
+        self.assertIn('href="ntfy://ntfy.sh/tw-dad-abc?display=TailWatcher%20%C2%B7%20Dad%20%3Cscript%3E"', page)
         self.assertIn("https://ntfy.sh/tw-dad-abc", page)
         self.assertNotIn("<script>alert", page)
         self.assertIn("Dad &lt;script&gt;", page)
         self.assertIn("&lt;b&gt;Sam&lt;/b&gt; invited you", page)
         self.assertNotIn("asks for a login", page)
         login = invites.join_page(inv, "Dad", "http://ntfy.local:8080", "local", "login")
-        self.assertIn("ntfy://ntfy.local:8080/tw-dad-abc?secure=false", login)
+        self.assertIn("ntfy://ntfy.local:8080/tw-dad-abc?display=TailWatcher%20%C2%B7%20Dad&amp;secure=false", login)
+        self.assertIn("Display name", login)
         self.assertIn("asks for a login", login)
         self.assertNotIn("Trust anchor", page)  # ntfy.sh has a certificate every phone trusts
         self.assertIn("Trust anchor", login)
         self.assertIn("Let &lt;b&gt;Sam&lt;/b&gt; know", login)
         self.assertIn("expired", invites.expired_page())
+
+
+class LinksTest(unittest.TestCase):
+    def test_display_name_in_app_link(self):
+        app, web, host = invites.links("tw-dad-abc", "https://ntfy.example.com/", "Mom & Dad")
+        self.assertEqual(app, "ntfy://ntfy.example.com/tw-dad-abc?display=TailWatcher%20%C2%B7%20Mom%20%26%20Dad")
+        self.assertEqual(web, "https://ntfy.example.com/tw-dad-abc")
+        self.assertEqual(host, "ntfy.example.com")
+        self.assertTrue(invites.links("tw-x", "http://ntfy.local")[0].endswith("?display=TailWatcher&secure=false"))
+        self.assertEqual(invites.links("tw-x", ""), (None, None, None))
 
 
 class Health:

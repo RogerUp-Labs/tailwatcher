@@ -22,6 +22,8 @@ Each watcher has their own notification topic, a long random name that TailWatch
 1. Install the free **ntfy** app (Google Play, F-Droid or the App Store; the links are in the dialog).
 2. Tap the subscribe link on their phone. **Send link** shares it; **Copy link** copies it. The ntfy app opens with their alerts ready to subscribe.
 
+On Android the subscription gets a friendly name like **TailWatcher · Dad** from the link. The iPhone app can't rename subscriptions, so it shows the server and topic (see **The ntfy app shows a long random topic name**).
+
 If the link doesn't open the app, open the web link shown under it, or in the ntfy app tap **+**, turn on **Use another server**, and enter the server and topic shown in the dialog.
 
 **With your own NTFY**, phones also have to trust its https certificate. A Start9 signs its addresses (.local, LAN and public IP addresses, including StartTunnel's) with its own root certificate, which phones don't know, so a phone that hasn't installed it gets a certificate error in the ntfy app (see **The ntfy app says "Trust anchor for certification path not found"**). That's easy to miss when your own phone trusted it long ago. StartTunnel forwards traffic to your Start9 but doesn't change the certificate: on its public IP address, phones still see the Start9's own. Two ways around it:
@@ -194,7 +196,7 @@ TailWatcher sends you alerts in the ntfy app when planes you follow take off or 
 
 You can type in your ntfy topic to manage your list: send a tail or flight number (`N12345`, `UA1234 for 2 days`) to follow it, `remove N12345` to stop, `list` to see your list, or `help` for everything.
 
-To stop all alerts, unsubscribe from the topic in the ntfy app. On Android, set the ntfy app's battery use to **Unrestricted** so alerts arrive on time.
+On iPhone the subscription shows a long random topic name; that's normal (on Android it's called TailWatcher and the watcher's name). To stop all alerts, unsubscribe from the topic in the ntfy app. On Android, set the ntfy app's battery use to **Unrestricted** so alerts arrive on time.
 
 ## Troubleshooting
 
@@ -236,6 +238,10 @@ This only happens with your own NTFY. Check these in order:
 - **An old login saved in the app.** A wrong or outdated login is refused even on topics anyone can open. In the ntfy app, open **Settings → Manage users** and delete any user listed for your NTFY's address, then subscribe again.
 - **An old topic.** Phones without a login can only open topics starting with `tw-`. Watchers made by older versions have `tailwatcher_…` topics: **Edit** the watcher, tick **Give them a new topic**, and send a fresh **Connect phone** link.
 - **Logins per person.** If **⚙ Settings** has phones connect with one NTFY login per person, they need theirs from **Connect phone → Create NTFY login**, added in the app under **Settings → Manage users**.
+
+### The ntfy app shows a long random topic name
+
+Topics are long and random on purpose: on ntfy.sh, the name is the only lock. On **Android**, subscribe links and invites name the subscription after the watcher, like **TailWatcher · Dad**, when it's first added. To rename one added earlier, open it in the ntfy app and tap ⋮ → **Subscription settings** → **Display name**. In the ntfy **web app**, the topic's ⋮ menu has **Change display name**. The **iPhone** app has no display names yet, so it always shows the server and topic; each alert's title still says which plane or trip it's about.
 
 ### Someone says their invite link has expired
 
