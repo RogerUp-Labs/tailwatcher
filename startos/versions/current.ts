@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.20.4:0',
+  version: '0.21.0:0',
   releaseNotes: {
     en_US:
-      'Help now explains the "Trust anchor for certification path not found" error some phones get in the ntfy app with this server\'s NTFY: a Start9 signs its addresses, including a StartTunnel public IP, with its own root certificate, which phones only trust once it is installed. The fix for people outside your household is a public domain with a Let\'s Encrypt certificate through StartTunnel; for your own phones, installing the root certificate also works. Connect phone and invite pages now point to these steps, and once NTFY or TailWatcher has a public domain, Connect phone links and invites use it instead of a public IP.',
+      'Trips come first: a watcher can now send plane-spotting alerts (the tail and flight numbers they watch) to a separate Planes topic, so their main topic carries only trips, shared trips and replies. Turn it on with "Separate topic for plane alerts" when editing a watcher in the Web UI, then subscribe with the second link in Connect phone. Text commands work in either topic. Nothing changes until you turn it on.',
   },
   migrations: {
     up: async () => {},

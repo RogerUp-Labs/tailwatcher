@@ -47,7 +47,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.20.4"
+VERSION = "0.21.0"
 # "startos" (main.ts sets it) or "docker" (the Dockerfile's default): only
 # changes setup hints and whether the dashboard password starts on.
 PLATFORM = os.environ.get("TW_PLATFORM", "startos")
@@ -104,6 +104,7 @@ def load_config(path=CONFIG_PATH, now=None):
     watchers = []
     for w in watchers_raw or []:
         topic = (w.get("topic") or "").strip()
+        planes = (w.get("planesTopic") or "").strip()
         aircraft = []
         for a in w.get("aircraft") or []:
             kind = "flight" if a.get("kind") == "flight" else "tail"
@@ -124,6 +125,9 @@ def load_config(path=CONFIG_PATH, now=None):
             watchers.append({
                 "name": (w.get("name") or topic).strip(),
                 "topic": topic,
+                # Optional second topic for tail/flight watching, so the main
+                # topic stays about trips. Blank = plane alerts go to `topic`.
+                "planes_topic": planes if planes != topic else "",
                 "aircraft": aircraft,
                 "notify_landing": bool(w.get("notifyLanding", False)),
                 "priority": w.get("priority") or "default",
@@ -345,6 +349,21 @@ def build_message(cfg, watcher, tail, label, ac, event, airports, kind="tail"):
         "click": actions[0]["url"] if actions else None,
         "actions": actions,
     }
+
+
+def planes_topic(watcher):
+    """Where a watcher's plane-watching alerts go: their Planes topic if set."""
+    return watcher.get("planes_topic") or watcher["topic"]
+
+
+def home_topics(cfg):
+    """Every topic TailWatcher listens on, mapped to its watcher's main topic."""
+    out = {}
+    for w in cfg["watchers"]:
+        out[w["topic"]] = w["topic"]
+        if w.get("planes_topic"):
+            out.setdefault(w["planes_topic"], w["topic"])
+    return out
 
 
 PUBLIC_NTFY = "https://ntfy.sh"
@@ -739,8 +758,11 @@ def run():
         return set_share(topic, f"{number}{' only' if only else ''}",
                          add=who if adding else None, drop=None if adding else who)
 
-    def on_command(topic, text):
-        hist.add("in", topic, text, kind="command", status="received")
+    def on_command(where, text):
+        """A message typed in a watcher's topic (or their Planes topic, which
+        acts for the same watcher). The reply goes back where it was typed."""
+        hist.add("in", where, text, kind="command", status="received")
+        topic = home_topics(cfg).get(where, where)
         verb, ident, _, _ = commands.parse(text)
         if verb in ("inbound", "return", "connect", "trips", "cancel", "change", "share", "unshare"):
             if not any(w["topic"] == topic for w in cfg["watchers"]):
@@ -761,14 +783,14 @@ def run():
             else:
                 reply = trips.modify_legs(topic, ident, on_cancel, now, cfg["time_zone"])
             log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0])
-            send({"topic": topic, "message": reply, "tags": ["robot"], "priority": 2})
+            send({"topic": where, "message": reply, "tags": ["robot"], "priority": 2})
             return
         if verb == "info":
             if not any(w["topic"] == topic for w in cfg["watchers"]):
                 return
             reply = on_info(topic, ident)
             log.info("command on %s: %r → %s", topic, text, reply.get("title") or reply["message"])
-            send({"topic": topic, "tags": ["robot"], "priority": 2, **reply})
+            send({"topic": where, "tags": ["robot"], "priority": 2, **reply})
             return
         reply, changed = commands.apply_command(CONFIG_PATH, topic, text, status=load_state())
         if reply and verb == "remove" and trips.cancel(topic, ident):
@@ -780,7 +802,7 @@ def run():
                 reply += "\n\n" + trips.describe_all(mine, cfg["time_zone"])
         log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0] if reply else "ignored")
         if reply:
-            send({"topic": topic, "message": reply, "tags": ["robot"], "priority": 2})
+            send({"topic": where, "message": reply, "tags": ["robot"], "priority": 2})
         if changed:
             wake.set()
 
@@ -953,6 +975,7 @@ def run():
         rate-limit backoff) must show up right away."""
         now, st, cur = time.time(), load_state(), load_config()
         names = {w["topic"]: w["name"] for w in cur["watchers"]}
+        home = home_topics(cur)
         watchers_out = []
         for w in cur["watchers"]:
             aircraft = []
@@ -968,7 +991,8 @@ def run():
                     "hex": s_.get("hex"), "alt": fix.get("alt_baro"), "gs": fix.get("gs"),
                     "where": airports.place(fix.get("lat"), fix.get("lon"), fix.get("alt_baro") == "ground"),
                     "callsign": (fix.get("flight") or "").strip(), "type": fix.get("t"), "reg": fix.get("r")})
-            watchers_out.append({"name": w["name"], "topic": w["topic"], "priority": w["priority"],
+            watchers_out.append({"name": w["name"], "topic": w["topic"], "planes_topic": w["planes_topic"],
+                                 "priority": w["priority"],
                                  "notify_landing": w["notify_landing"], "aircraft": aircraft, "following": []})
         trips_out = []
         all_trips = trips.load()
@@ -1017,7 +1041,8 @@ def run():
             "watchers": watchers_out, "trips": trips_out,
             "invites": [{k: i.get(k) for k in ("token", "topic", "from", "expires", "kind")}
                         for i in invites.active(now) if i.get("topic") in names],
-            "history": [dict(e, watcher=names.get(e["topic"]) or e["topic"] or "Settings") for e in hist.recent(150)],
+            "history": [dict(e, watcher=names.get(home.get(e["topic"])) or e["topic"] or "Settings")
+                        for e in hist.recent(150)],
         }
 
     def trip_text(data, number=None, prefix=""):
@@ -1054,7 +1079,8 @@ def run():
                 logins = []
                 if phones == "login":
                     for w in load_config()["watchers"]:
-                        user, pw = ntfy_admin.create_login(local, str(data.get("adminPassword")), w["name"], w["topic"])
+                        user, pw = ntfy_admin.create_login(local, str(data.get("adminPassword")), w["name"],
+                                                           [w["topic"], w["planes_topic"]])
                         logins.append({"name": w["name"], "username": user, "password": pw})
                     if logins:
                         steps.append(f"Made NTFY logins for {', '.join(l['name'] for l in logins)}")
@@ -1069,7 +1095,8 @@ def run():
                 w = next((x for x in load_config()["watchers"] if x["topic"] == data.get("topic")), None)
                 if w is None:
                     return 404, {"ok": False, "message": "That watcher no longer exists."}
-                user, pw = ntfy_admin.create_login(local, str(data.get("adminPassword") or ""), w["name"], w["topic"])
+                user, pw = ntfy_admin.create_login(local, str(data.get("adminPassword") or ""), w["name"],
+                                                   [w["topic"], w["planes_topic"]])
                 return 200, {"ok": True, "message": f"Made an NTFY login for {w['name']}.",
                              "logins": [{"name": w["name"], "username": user, "password": pw}]}
         except (edits.EditError, ntfy_admin.SetupError) as e:
@@ -1123,7 +1150,8 @@ def run():
                     msg = edits.save_watcher(CONFIG_PATH, data.get("original") or None, data.get("name"),
                                              data.get("topic"), data.get("priority") or "default",
                                              bool(data.get("notifyLanding")),
-                                             new_topic_requested=bool(data.get("newTopic")))
+                                             new_topic_requested=bool(data.get("newTopic")),
+                                             planes=data.get("planes"))
                 elif op == "remove":
                     msg = edits.remove_watcher(CONFIG_PATH, topic)
                 else:
@@ -1233,7 +1261,8 @@ def run():
         for topic, ident in expired:
             log.info("%s: expired for %s", ident, topic)
             if ntfy_url:
-                send({"topic": topic, "message": f"⌛ Stopped watching {ident} (expired)",
+                where = next((planes_topic(w) for w in cfg["watchers"] if w["topic"] == topic), topic)
+                send({"topic": where, "message": f"⌛ Stopped watching {ident} (expired)",
                       "tags": ["robot"], "priority": 2})
 
         mtime = config_mtime()
@@ -1250,7 +1279,7 @@ def run():
             log.info("polling %d aircraft via %s every %ss, ntfy %s, text commands %s",
                      len(subs), cfg["data_source"], cfg["poll_seconds"], ntfy_url,
                      "on" if cfg["text_commands"] else "off")
-            topics = [w["topic"] for w in cfg["watchers"]] if cfg["text_commands"] and ntfy_url else []
+            topics = list(home_topics(cfg)) if cfg["text_commands"] and ntfy_url else []
             listeners.sync(topics, ntfy_url, ntfy_token)
 
         if not cfg["watchers"] or not ntfy_url:
@@ -1300,6 +1329,7 @@ def run():
                         continue
                     payload = build_message(cfg, watcher, entry["tail"], entry["label"], fix, event,
                                             airports, entry["kind"])
+                    payload["topic"] = planes_topic(watcher)
                     if not send(payload):
                         retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
             state[key] = st

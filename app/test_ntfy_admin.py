@@ -61,6 +61,10 @@ class SetupTest(unittest.TestCase):
         self.assertIn(("PUT", "/v1/users/access", {"username": "dad2", "topic": "tw-dad-x",
                                                    "permission": "read-write"}), ntfy.calls)
         self.assertEqual(ntfy_admin.username_for("Admin", set()), "twadmin")
+        ntfy = FakeNtfy()
+        ntfy_admin.create_login("http://ntfy", "right", "Mom", ["tw-mom-x", "tw-mom-planes-y", ""], call=ntfy)
+        self.assertEqual([c[2]["topic"] for c in ntfy.calls if c[1] == "/v1/users/access"],
+                         ["tw-mom-x", "tw-mom-planes-y"])
 
 
 class SettingsTest(unittest.TestCase):

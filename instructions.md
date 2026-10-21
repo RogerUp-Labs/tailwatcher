@@ -47,6 +47,10 @@ What the alerts mean:
 
 Tapping an alert opens the plane on a live map.
 
+### Keep plane alerts separate from trips
+
+Plane spotters can give these alerts their own topic, so the main topic carries only trips, shared trips and replies. **Edit** the watcher and tick **Separate topic for plane alerts**, then open **Connect phone** and subscribe to the second link too. Text commands work in either topic, and the reply comes back in the topic you typed in. Untick it to send plane alerts back to the main topic.
+
 ## Text commands
 
 People can manage their own list by typing in their topic in the ntfy app (the message bar at the bottom). TailWatcher replies in the same conversation.

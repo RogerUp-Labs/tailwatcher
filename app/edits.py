@@ -34,12 +34,13 @@ TIME_ZONES = {
 }  # keep in sync with timeZones in startos/fileModels/config.json.ts
 
 
-def new_topic(name):
-    """An unguessable topic like "tw-dad-k3j9…": on ntfy.sh, where anyone can
-    read any topic, the name is the only lock, so 20 random characters."""
+def new_topic(name, kind=""):
+    """An unguessable topic like "tw-dad-k3j9…" (kind "planes": "tw-dad-planes-k3j9…"):
+    on ntfy.sh, where anyone can read any topic, the name is the only lock, so
+    20 random characters."""
     slug = re.sub(r"[^a-z0-9]+", "", (name or "").lower())[:12] or "watcher"
     alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
-    return f"tw-{slug}-" + "".join(secrets.choice(alphabet) for _ in range(20))
+    return f"tw-{slug}-{kind + '-' if kind else ''}" + "".join(secrets.choice(alphabet) for _ in range(20))
 
 
 class EditError(Exception):
@@ -50,10 +51,16 @@ def _find(raw, topic):
     return next((w for w in raw.get("watchers") or [] if w.get("topic") == topic), None)
 
 
+def _uses(w, topic):
+    return topic in (w.get("topic"), w.get("planesTopic"))
+
+
 def save_watcher(path, original, name, topic, priority="default", notify_landing=False, trips_path=None,
-                 new_topic_requested=False):
+                 new_topic_requested=False, planes=None):
     """Add a watcher (original=None) or update the one whose topic is `original`.
-    A blank topic gets a new unguessable one (new watchers) or stays as it was."""
+    A blank topic gets a new unguessable one (new watchers) or stays as it was.
+    planes: True gives them a separate Planes topic (kept if they have one),
+    False puts plane alerts back in the main topic, None leaves it as it is."""
     name, topic = (name or "").strip()[:40], (topic or "").strip()
     if not name:
         raise EditError("Give the watcher a name.")
@@ -69,7 +76,7 @@ def save_watcher(path, original, name, topic, priority="default", notify_landing
         current = _find(raw, original) if original else None
         if original and current is None:
             raise EditError("That watcher no longer exists.")
-        clash = _find(raw, topic)
+        clash = next((w for w in watchers if _uses(w, topic)), None)
         if clash is not None and clash is not current:
             raise EditError(f"Another watcher already uses the topic {topic}.")
         if current is None:
@@ -78,6 +85,9 @@ def save_watcher(path, original, name, topic, priority="default", notify_landing
             current = {"name": name, "topic": topic, "aircraft": [], "notifyLanding": False, "priority": "default"}
             watchers.append(current)
         current.update(name=name, topic=topic, priority=priority, notifyLanding=bool(notify_landing))
+        if planes is not None:
+            keep = current.get("planesTopic") if current.get("planesTopic") != topic else ""
+            current["planesTopic"] = (keep or new_topic(name, "planes")) if planes else ""
         commands.write_raw(path, raw)
     if original and original != topic:
         rename_trip_topic(original, topic, trips_path)

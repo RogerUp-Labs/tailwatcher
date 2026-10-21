@@ -82,6 +82,20 @@ const watcherSpec = InputSpec.of({
       },
     ],
   }),
+  planesTopic: Value.text({
+    name: 'Planes Topic',
+    description:
+      'Optional. Plane-spotting alerts (the tail and flight numbers below) go to this topic instead, so the main topic stays about trips. Leave blank to keep everything in one topic. Easiest from the Web UI: Edit the watcher and turn on "Separate topic for plane alerts".',
+    required: false,
+    default: null,
+    placeholder: 'tw-dad-planes-…',
+    patterns: [
+      {
+        regex: '^[a-zA-Z0-9_-]{1,64}$',
+        description: 'Letters, numbers, underscores and hyphens only',
+      },
+    ],
+  }),
   aircraft: Value.list(
     List.obj(
       {
@@ -258,6 +272,7 @@ export const configure = sdk.Action.withInput(
       aerodataboxKey: c.aerodataboxKey || null,
       watchers: c.watchers.map((w) => ({
         ...w,
+        planesTopic: w.planesTopic || null,
         aircraft: w.aircraft.map((a) => ({
           tail: a.tail,
           label: a.label || null,
@@ -298,6 +313,8 @@ export const configure = sdk.Action.withInput(
         return {
           name: w.name.trim(),
           topic,
+          planesTopic:
+            w.planesTopic?.trim() === topic ? '' : (w.planesTopic?.trim() ?? ''),
           aircraft: w.aircraft.map((a) => ({
             tail: norm(a.tail),
             label: a.label?.trim() ?? '',

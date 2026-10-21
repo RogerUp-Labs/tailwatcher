@@ -151,6 +151,19 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual([(w["name"], a["label"]) for w, a in subs["N12345"]],
                          [("Sam", ""), ("Dad", "Sam's plane")])
 
+    def test_planes_topic(self):
+        cfg = tw.load_config(self.write({"watchers": [
+            {"name": "Sam", "topic": "tw-sam-a", "planesTopic": "tw-sam-planes-b", "aircraft": []},
+            {"name": "Dad", "topic": "tw-dad-c", "aircraft": []},
+            {"name": "Odd", "topic": "tw-odd-d", "planesTopic": "tw-odd-d", "aircraft": []},
+        ]}))
+        sam, dad, odd = cfg["watchers"]
+        self.assertEqual(tw.planes_topic(sam), "tw-sam-planes-b")
+        self.assertEqual(tw.planes_topic(dad), "tw-dad-c")       # not set: plane alerts stay in the main topic
+        self.assertEqual(odd["planes_topic"], "")                 # same as the main topic = not separate
+        self.assertEqual(tw.home_topics(cfg), {"tw-sam-a": "tw-sam-a", "tw-sam-planes-b": "tw-sam-a",
+                                               "tw-dad-c": "tw-dad-c", "tw-odd-d": "tw-odd-d"})
+
     def test_flights_share_a_callsign_and_expired_entries_are_skipped(self):
         cfg = tw.load_config(self.write({"watchers": [
             {"name": "Sam", "topic": "tailwatcher_sam", "aircraft": [
