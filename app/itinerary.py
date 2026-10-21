@@ -477,17 +477,16 @@ def to_form(groups):
             form[prefix + "airport"] = f["dep"]
 
     put("", out[0])
-    if len(out) > 1:
-        put("conn_", out[1], with_date=False, with_airport=False)
+    for n, f in enumerate(out[1:trips.MAX_LEGS]):
+        put(trips.form_prefix("", n), f, with_date=False, with_airport=False)
     if ret:
         put("ret_", ret[0])
-        if len(ret) > 1:
-            put("ret_conn_", ret[1], with_date=False, with_airport=False)
-    extra = out[2:] + ret[2:]
+        for n, f in enumerate(ret[1:trips.MAX_LEGS]):
+            put(trips.form_prefix("ret_", n), f, with_date=False, with_airport=False)
+    extra = out[trips.MAX_LEGS:] + ret[trips.MAX_LEGS:]
     if extra:
-        notes.append("The form holds two flights each way, so add "
-                     + ", ".join(f["flight"] for f in extra)
-                     + " afterwards: Edit the trip and fill in its connecting flight.")
+        notes.append(f"I can follow up to {trips.MAX_LEGS} flights in a row each way, so "
+                     + ", ".join(f["flight"] for f in extra) + " were left out.")
     for g in groups[2:]:
         notes.append(f"{', '.join(f['flight'] for f in g)} looks like a separate trip; import or add it on its own.")
     if any(not f.get("date") for f in out + ret):

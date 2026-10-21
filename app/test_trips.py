@@ -627,7 +627,7 @@ class ConnectionTest(unittest.TestCase):
         self.assertIn("Which flight is the connection", self.parse("UA1 11/14 then"))
         self.assertTrue(self.parse("UA1 11/14 then banana").startswith("❌ Connection:"))
         self.assertIn("is before", self.parse("UA1 11/14 then UA2 11/10"))
-        self.assertIn("up to 4 flights", self.parse("UA1 then UA2 then UA3 then UA4 then UA5"))
+        self.assertIn(f"up to {trips.MAX_LEGS} flights", self.parse(" then ".join(f"UA{n}" for n in range(1, trips.MAX_LEGS + 2))))
 
     def test_numbered_and_described_together(self):
         self.store("DL89 11/16")
