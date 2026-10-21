@@ -123,7 +123,8 @@ def username_for(name, taken):
 
 
 def create_login(base, admin_password, name, topic, admin_user="admin", call=_call):
-    """Make an NTFY account for one person with Read-Write on their topic.
+    """Make an NTFY account for one person with Read-Write on their topic (or
+    topics: a list also covers their Planes topic; blanks are skipped).
     Returns (username, password). The password is shown once and not stored."""
     if not admin_password:
         raise SetupError("Enter NTFY's admin password.")
@@ -136,7 +137,8 @@ def create_login(base, admin_password, name, topic, admin_user="admin", call=_ca
     user, password = username_for(name, taken), _password(16)
     status, _ = call(base, "POST", "/v1/users", admin, {"username": user, "password": password})
     _check(status, f"create a login for {name}")
-    status, _ = call(base, "PUT", "/v1/users/access", admin,
-                     {"username": user, "topic": topic, "permission": "read-write"})
-    _check(status, f"give {name} access to their topic")
+    for t in [x for x in ([topic] if isinstance(topic, str) else topic) if x]:
+        status, _ = call(base, "PUT", "/v1/users/access", admin,
+                         {"username": user, "topic": t, "permission": "read-write"})
+        _check(status, f"give {name} access to their topic")
     return user, password

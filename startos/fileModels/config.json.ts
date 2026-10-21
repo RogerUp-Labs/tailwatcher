@@ -38,6 +38,8 @@ const aircraft = z.object({
 const watcher = z.object({
   name: z.string(),
   topic: z.string(),
+  /** Optional separate topic for tail/flight-number alerts; blank = they go to `topic` with the trips. */
+  planesTopic: z.string().catch(''),
   aircraft: z.array(aircraft).catch([]),
   notifyLanding: z.boolean().catch(false),
   priority: priority.catch('default'),

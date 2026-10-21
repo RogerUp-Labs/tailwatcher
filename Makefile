@@ -4,7 +4,7 @@
 #   make install    # sideload the .s9pk to the host in ~/.startos/config.yaml
 #   make test       # run the watcher's unit tests
 
-IMAGE := start9/tailwatcher/main:0.20.5
+IMAGE := start9/tailwatcher/main:0.21.0
 ARCHES := x86 arm
 TARGETS := x86
 

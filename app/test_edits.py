@@ -48,6 +48,18 @@ class EditsTest(unittest.TestCase):
         edits.save_watcher(self.cfg, topic, "Parents", topic, new_topic_requested=True)
         self.assertRegex(self.read()["watchers"][1]["topic"], r"^tw-parents-[a-z2-9]{20}$")
 
+    def test_planes_topic(self):
+        edits.save_watcher(self.cfg, "tailwatcher_sam", "Sam", "", planes=True)
+        planes = self.read()["watchers"][0]["planesTopic"]
+        self.assertRegex(planes, r"^tw-sam-planes-[a-z2-9]{20}$")
+        edits.save_watcher(self.cfg, "tailwatcher_sam", "Sam", "", planes=True)    # kept, not remade
+        edits.save_watcher(self.cfg, "tailwatcher_sam", "Sammy", "")               # None leaves it alone
+        self.assertEqual(self.read()["watchers"][0]["planesTopic"], planes)
+        with self.assertRaisesRegex(edits.EditError, "already uses"):
+            edits.save_watcher(self.cfg, None, "Twin", planes)
+        edits.save_watcher(self.cfg, "tailwatcher_sam", "Sam", "", planes=False)
+        self.assertEqual(self.read()["watchers"][0]["planesTopic"], "")
+
     def test_watcher_validation(self):
         with self.assertRaisesRegex(edits.EditError, "already uses"):
             edits.save_watcher(self.cfg, None, "Twin", "tailwatcher_sam")

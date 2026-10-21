@@ -248,6 +248,7 @@ dialog h3 { margin: 0 0 2px; font-size: 17px; }
 .field small { color: var(--text-3); font-size: 12px; }
 .field.check { grid-template-columns: auto 1fr; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
 .field.check input { width: 18px; height: 18px; }
+.field.check small { grid-column: 2; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .checks { display: grid; gap: 6px; font-size: 13px; color: var(--text-2); }
 .checks .opts { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -528,7 +529,7 @@ function renderWatchers(d) {
     <div class="card watcher">
       <div class="w-head">
         <div class="avatar" style="background:${hue(wi)}">${esc(initials(w.name))}</div>
-        <div><div class="w-name">${esc(w.name)}</div><div class="w-topic">${esc(w.topic)}</div></div>
+        <div><div class="w-name">${esc(w.name)}</div><div class="w-topic">${esc(w.topic)}</div>${w.planes_topic ? `<div class="w-topic">✈ planes: ${esc(w.planes_topic)}</div>` : ""}</div>
         <div class="w-tags">
           ${w.priority !== "default" ? `<span class="tag accent">${esc(w.priority)} priority</span>` : ""}
           ${w.notify_landing ? `<span class="tag">landings</span>` : ""}
@@ -791,7 +792,7 @@ function renderWatchersBoard(d) {
       return `<div class="flap-row cols-fleet">${flaps(k + ":id", a.ident, 7)}${flaps(k + ":alt", alt, 5, sc === "y" ? "y" : "")}${flaps(k + ":s", status, 9, sc)}</div>
         <div class="flap-sub">${bits.join(" · ")}</div>`;
     }).join("");
-    return `<div class="flap-group">${esc(w.name)} <small>${esc(w.topic)}</small>${w.priority !== "default" ? ` <span class="tag accent">${esc(w.priority)}</span>` : ""}
+    return `<div class="flap-group">${esc(w.name)} <small>${esc(w.topic)}</small>${w.planes_topic ? ` <small>✈ ${esc(w.planes_topic)}</small>` : ""}${w.priority !== "default" ? ` <span class="tag accent">${esc(w.priority)}</span>` : ""}
         <span style="margin-left:auto;display:flex;gap:12px"><button type="button" class="linkbtn" data-act="connect" data-topic="${esc(w.topic)}">connect phone</button><button type="button" class="linkbtn" data-act="add-aircraft" data-topic="${esc(w.topic)}">+ aircraft</button><button type="button" class="linkbtn" data-act="edit-watcher" data-topic="${esc(w.topic)}">edit</button></span></div>
       ${(w.following || []).map((f) => `<div class="flap-sub">📣 following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}
       ${rows || (w.following && w.following.length ? "" : `<div class="flap-sub">No aircraft yet. Text a tail number to <code>${esc(w.topic)}</code>.</div>`)}`;
@@ -856,7 +857,7 @@ const field = (f) => {
   if (f.type === "legs") return `<div class="legs" id="legs-${f.base || "out"}"><div class="legs" data-list>${legBlocks(f, f.value || [])}</div>`
     + `<button type="button" class="linkbtn add-leg">${esc(f.add)}</button>${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</div>`;
   if (f.type === "heading") return `<div class="form-sub">${esc(f.label)}${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</div>`;
-  if (f.type === "check") return `<label class="field check"><input type="checkbox" id="${id}" name="${f.name}" ${v ? "checked" : ""}> ${esc(f.label)}</label>`;
+  if (f.type === "check") return `<label class="field check"><input type="checkbox" id="${id}" name="${f.name}" ${v ? "checked" : ""}> ${esc(f.label)}${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`;
   if (f.type === "select") return `<label class="field" for="${id}">${esc(f.label)}<select id="${id}" name="${f.name}">${f.options.map(([val, lab]) => `<option value="${esc(val)}" ${String(val) === String(v) ? "selected" : ""}>${esc(lab)}</option>`).join("")}</select>${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`;
   return `<label class="field" for="${id}">${esc(f.label)}<input id="${id}" name="${f.name}" type="${f.type || "text"}" value="${esc(v)}" ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ""} ${f.required ? "required" : ""} ${f.attrs || ""} autocomplete="off" autocapitalize="${f.caps === false ? "off" : "characters"}" spellcheck="false">${f.hint ? `<small>${esc(f.hint)}</small>` : ""}</label>`;
 };
@@ -1063,6 +1064,9 @@ function watcherForm(w) {
       [{name: "priority", label: "Priority", type: "select", value: w ? w.priority : "default",
         options: [["low", "Low"], ["default", "Default"], ["high", "High"], ["max", "Max"]]},
        {name: "notifyLanding", label: "Landing alerts too", type: "check", value: w ? w.notify_landing : false}],
+      {name: "planes", label: "Separate topic for plane alerts", type: "check", value: !!(w && w.planes_topic),
+       hint: w && w.planes_topic ? `Plane alerts go to ${w.planes_topic}. Turn off to send them back to the main topic.`
+         : "For plane spotters: alerts for the tail and flight numbers they watch get their own topic, so the main one is just trips. They subscribe to both (Connect phone)."},
       ...(w ? [{name: "newTopic", label: "Give them a new topic (then reconnect their phone)", type: "check", value: false}] : []),
     ],
     save: async (v) => {
@@ -1088,20 +1092,21 @@ function aircraftForm(w, a) {
       run: () => api("api/aircraft", {op: "remove", topic: w.topic, ident: a.ident})} : null});
 }
 
-function connectInfo(w) {
+function connectInfo(w, topic = w.topic, label = w.name) {
   const s = LAST.settings;
   const base = (s.phone_url || "").replace(/\/+$/, "");
   if (!base) return null;
   const u = new URL(base);
   const secure = u.protocol === "https:";
   // display= names the subscription in the ntfy Android app (invites.display_name() does the same)
-  const app = `ntfy://${u.host}${u.pathname.replace(/\/$/, "")}/${encodeURIComponent(w.topic)}?display=${encodeURIComponent(`TailWatcher · ${w.name}`)}${secure ? "" : "&secure=false"}`;
-  const web = `${base}/${encodeURIComponent(w.topic)}`;
+  const app = `ntfy://${u.host}${u.pathname.replace(/\/$/, "")}/${encodeURIComponent(topic)}?display=${encodeURIComponent(`TailWatcher · ${label}`)}${secure ? "" : "&secure=false"}`;
+  const web = `${base}/${encodeURIComponent(topic)}`;
   return {app, web, host: u.host};
 }
 
 function connectPhone(w) {
   const info = connectInfo(w), local = LAST.settings.ntfy_server === "local";
+  const planes = w.planes_topic ? connectInfo(w, w.planes_topic, `${w.name} planes`) : null;
   const form = $("dlg-form");
   const message = info ? `Get flight alerts from TailWatcher: install the free ntfy app, then tap this link on your phone: ${info.app}` : "";
   let sender = "";
@@ -1139,6 +1144,9 @@ function connectPhone(w) {
         ${LAST.settings.ntfy_server !== "public" ? `<div class="note">Certificate error in the ntfy app ("Trust anchor … not found")? Their phone doesn't trust your server's https certificate yet. <button type="button" class="linkbtn help-link" data-act="help" data-section="the-ntfy-app-says-trust-anchor-for-certification-path-not-found">How to fix it</button></div>` : ""}</li>`
       : `<li>In the ntfy app, tap +, turn on "Use another server", enter your NTFY's address, and subscribe to <b>${esc(w.topic)}</b>.
         <div class="note">TailWatcher can't see an address phones can use for your NTFY. ${docker() ? "Set NTFY_PHONE_URL to the https address phones use for it" : "Give NTFY a public or LAN address in StartOS"}, and this becomes a one-tap link.</div></li>`}
+      ${w.planes_topic ? `<li>Plane alerts have their own topic. If they want those too, subscribe to it as well${planes ? `:
+        <a class="bigLink" href="${esc(planes.app)}">${esc(planes.app)}</a>
+        <div class="note">Or in the app tap + and enter topic <b>${esc(w.planes_topic)}</b>.</div>` : `: <b>${esc(w.planes_topic)}</b>.`}</li>` : ""}
       ${local && LAST.settings.ntfy_phone_mode === "login" ? `<li>Their ntfy app needs an NTFY login for your server.
         <div class="row-btns"><input id="cp-admin" type="password" autocomplete="off" placeholder="NTFY admin password" style="flex:1;min-width:160px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)">
         <button type="button" class="btn" id="cp-login">Create NTFY login</button></div>
