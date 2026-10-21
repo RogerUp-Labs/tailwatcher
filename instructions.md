@@ -24,6 +24,13 @@ Each watcher has their own notification topic, a long random name that TailWatch
 
 If the link doesn't open the app, open the web link shown under it, or in the ntfy app tap **+**, turn on **Use another server**, and enter the server and topic shown in the dialog.
 
+**With your own NTFY**, phones also have to trust its https certificate. A Start9 signs its addresses (.local, LAN and public IP addresses, including StartTunnel's) with its own root certificate, which phones don't know, so a phone that hasn't installed it gets a certificate error in the ntfy app (see **The ntfy app says "Trust anchor for certification path not found"**). That's easy to miss when your own phone trusted it long ago. StartTunnel forwards traffic to your Start9 but doesn't change the certificate: on its public IP address, phones still see the Start9's own. Two ways around it:
+
+- **Recommended for people outside your household:** give NTFY a public domain (a domain name you own) through your StartTunnel gateway, with a Let's Encrypt certificate. Every phone trusts that already. See Start9's [public access guide](https://docs.start9.com/start-os/0.4.0.x/public-access.html); do the same for TailWatcher's Web UI so invite links use the domain too. TailWatcher picks up both domains by itself and prefers them over a public IP; then send new **Connect phone** links or invites.
+- **For your own phones:** install your Start9's root certificate on each one ([Start9's guide](https://docs.start9.com/start-os/0.4.0.x/trust-ca.html)).
+
+ntfy.sh needs neither.
+
 Keep these links private: anyone with a person's link or invite could read their alerts.
 
 ## Watching planes and flights
@@ -144,7 +151,7 @@ Add and change things right on the page: **+ Add trip**, **+ Add watcher**, **+ 
 
 - **Notification server**
     - **ntfy.sh** (default): the free public ntfy service. Nothing to install. Each person's topic is a long random name, which is what keeps their alerts private. iPhones get alerts instantly.
-    - **This server's NTFY**: alerts stay on your hardware. Install NTFY, choose this option, enter NTFY's admin password and tap **Set up NTFY for me**. TailWatcher sets up its own NTFY user and token, and phones connect either **without a login** (recommended; just the Connect phone link) or with **one NTFY login per person** (TailWatcher creates them; **Connect phone** has a **Create NTFY login** button for people added later). The admin password is used for that one step and never saved.
+    - **This server's NTFY**: alerts stay on your hardware. Install NTFY, choose this option, enter NTFY's admin password and tap **Set up NTFY for me**. TailWatcher sets up its own NTFY user and token, and phones connect either **without a login** (recommended; just the Connect phone link) or with **one NTFY login per person** (TailWatcher creates them; **Connect phone** has a **Create NTFY login** button for people added later). The admin password is used for that one step and never saved. Phones must trust NTFY's https address: give it a public domain, or install your Start9's root certificate on each phone (see **Connecting a phone**).
     - **Another ntfy server**, at an address you enter.
 - **AeroDataBox key** (optional): for trips that find their plane automatically. Subscribe to the free Basic plan at rapidapi.com/aedbx-aedbx/api/aerodatabox and paste the key.
 - **ADS-B feed** and **Check every**: adsb.fi is the default. All planes are checked together, one request per cycle.
@@ -164,7 +171,7 @@ Settings that StartOS would fill in are set in docker-compose.yml instead:
 | Setting | What it's for |
 |---|---|
 | `NTFY_URL` | Your own ntfy, as TailWatcher reaches it: `http://<your NAS>:<port>`, or `http://ntfy:80` for the ntfy service in the same file. Then pick **This server's NTFY** in **⚙ Settings**. |
-| `NTFY_PHONE_URL` | The https address phones use for that ntfy, so **Connect phone** gives a one-tap link. |
+| `NTFY_PHONE_URL` | The https address phones use for that ntfy, so **Connect phone** gives a one-tap link. Its certificate must be one phones trust (for example Let's Encrypt from your reverse proxy); a self-signed one gives a certificate error in the ntfy app. |
 | `TAILWATCHER_PUBLIC_URL` | TailWatcher's own https address, if you put it behind a reverse proxy. Invite links need it. |
 | `TAILWATCHER_PASSWORD` | Your own dashboard password instead of the generated one. |
 
@@ -211,6 +218,24 @@ Self-hosted NTFY can't use Apple's instant push service, so iPhones may only rec
 ### "Too many requests" in System
 
 The free ADS-B feeds limit how often anyone can ask. TailWatcher switches to the other feed and backs off automatically. If it keeps happening, raise **Check every** in **⚙ Settings**.
+
+### The ntfy app says "Trust anchor for certification path not found"
+
+This (or another certificate error, such as "certificate not trusted") means the phone doesn't trust your NTFY's https certificate. It only happens with your own NTFY, not ntfy.sh. A Start9 signs its .local, LAN and IP addresses, including a StartTunnel public IP, with its own root certificate, and a phone only trusts it once that certificate is installed. A NAS or reverse proxy with a self-signed certificate does the same.
+
+- **For your own household's phones:** install your Start9's root certificate on the phone. Download it from StartOS (**System → Root CA**), then follow [Start9's guide](https://docs.start9.com/start-os/0.4.0.x/trust-ca.html) for Android or iPhone. On Android it's **Settings → Security → Encryption & credentials → Install a certificate → CA certificate**.
+- **For anyone else:** give NTFY a public domain with a Let's Encrypt certificate through your StartTunnel gateway (Start9's [public access guide](https://docs.start9.com/start-os/0.4.0.x/public-access.html)), so every phone trusts it. A StartTunnel public IP alone isn't enough: Let's Encrypt doesn't issue certificates for IP addresses. Then send them a new **Connect phone** link or invite. With Docker, put ntfy behind a reverse proxy with a Let's Encrypt certificate and set `NTFY_PHONE_URL` to that address.
+- **Or switch to ntfy.sh** in **⚙ Settings**, which needs no certificate setup, and send new links.
+
+The invite page itself can show a browser warning for the same reason if TailWatcher's public address is a StartTunnel IP; a public domain fixes that too.
+
+### The ntfy app says "not authorized" (HTTP 401 or 403)
+
+This only happens with your own NTFY. Check these in order:
+
+- **An old login saved in the app.** A wrong or outdated login is refused even on topics anyone can open. In the ntfy app, open **Settings → Manage users** and delete any user listed for your NTFY's address, then subscribe again.
+- **An old topic.** Phones without a login can only open topics starting with `tw-`. Watchers made by older versions have `tailwatcher_…` topics: **Edit** the watcher, tick **Give them a new topic**, and send a fresh **Connect phone** link.
+- **Logins per person.** If **⚙ Settings** has phones connect with one NTFY login per person, they need theirs from **Connect phone → Create NTFY login**, added in the app under **Settings → Manage users**.
 
 ### Someone says their invite link has expired
 

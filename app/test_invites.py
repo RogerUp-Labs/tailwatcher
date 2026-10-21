@@ -46,6 +46,9 @@ class InviteTest(unittest.TestCase):
         login = invites.join_page(inv, "Dad", "http://ntfy.local:8080", "local", "login")
         self.assertIn("ntfy://ntfy.local:8080/tw-dad-abc?secure=false", login)
         self.assertIn("asks for a login", login)
+        self.assertNotIn("Trust anchor", page)  # ntfy.sh has a certificate every phone trusts
+        self.assertIn("Trust anchor", login)
+        self.assertIn("Let &lt;b&gt;Sam&lt;/b&gt; know", login)
         self.assertIn("expired", invites.expired_page())
 
 

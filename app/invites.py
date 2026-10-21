@@ -141,12 +141,17 @@ def join_page(invite, watcher_name, phone_url, server_mode="public", phone_mode=
     if server_mode == "local" and phone_mode == "login":
         login_note = (f"<p class='note'>This server asks for a login. {e(sender or 'Whoever invited you')} "
                       "will send you a username and password to add in the ntfy app (Settings → Manage users).</p>")
+    cert_note = ""
+    if server_mode != "public":
+        cert_note = ("<p class='small'>Does the ntfy app say <b>Trust anchor for certification path not found</b> "
+                     "or show another certificate error? Your phone doesn't trust this server's certificate yet. "
+                     f"Let {e(sender or 'whoever invited you')} know; it's a setting on their server.</p>")
     if app:
         subscribe = f"""<a class="btn primary" href="{e(app)}">Subscribe in ntfy</a>
 <p class="small">Opens the ntfy app with your alerts ready. Tap <b>Subscribe</b> there.</p>
 <details><summary>It didn't open?</summary>
 <p class="small">Open <a href="{e(web)}" rel="noreferrer">{e(web)}</a>, or in the ntfy app tap <b>+</b>,
-turn on <b>Use another server</b>, and enter server <code>{e(host)}</code> and topic <code>{e(invite['topic'])}</code>.</p></details>"""
+turn on <b>Use another server</b>, and enter server <code>{e(host)}</code> and topic <code>{e(invite['topic'])}</code>.</p>{cert_note}</details>"""
     else:
         subscribe = f"""<p class="small">In the ntfy app tap <b>+</b>, turn on <b>Use another server</b>, and enter the
 server address you were given and topic <code>{e(invite['topic'])}</code>.</p>"""
