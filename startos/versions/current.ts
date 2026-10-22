@@ -1,10 +1,10 @@
 import { VersionInfo, IMPOSSIBLE } from '@start9labs/start-sdk'
 
 export const current = VersionInfo.of({
-  version: '0.22.1:0',
+  version: '0.23.0:0',
   releaseNotes: {
     en_US:
-      'Shorter Activity list on phones: the Web UI (and the home screen app) now shows the 8 newest entries, with "Show more" to load more and "Show less" to fold it back, so Activity no longer takes over the page. Computers keep the scrolling list as before.',
+      'Family accounts, finished: admins can make a sign-up link on the People page and text it to someone new. They open it, pick their own username and password, get a watcher of their own and are walked through getting alerts on their phone. Each link works once and expires. Forgot your password? "Forgot your password?" on the sign-in page sends a 6-digit code to your alerts in the ntfy app; type it with a new password, no admin needed.',
   },
   migrations: {
     up: async () => {},

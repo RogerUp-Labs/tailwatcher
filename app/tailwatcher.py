@@ -49,7 +49,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.22.1"
+VERSION = "0.23.0"
 # "startos" (main.ts sets it) or "docker" (the Dockerfile's default): only
 # changes setup hints and whether the dashboard password starts on.
 PLATFORM = os.environ.get("TW_PLATFORM", "startos")
@@ -1163,6 +1163,8 @@ def run():
             out["accounts"] = [{**{k: a.get(k) for k in ("id", "username", "name", "role", "last_login")},
                                 "watchers": [{"id": wid(t), "name": names[t]} for t in a.get("watchers") or [] if t in names]}
                                for a in data["accounts"]]
+            out["signups"] = [{k: i.get(k) for k in ("token", "from", "role", "watcher", "expires")}
+                              for i in invites.active(now) if i.get("kind") == "account"]
             out["unassigned"] = [{"id": wid(w["topic"]), "name": w["name"]} for w in cur["watchers"]
                                  if w["topic"] not in owner]
         return out
@@ -1254,14 +1256,65 @@ def run():
         return 404, {"ok": False, "message": "Not found."}
 
     def public_page(token):
-        """The invite page at /join/<token> (no dashboard password)."""
+        """The invite or sign-up page at /join/<token> (no dashboard password)."""
         inv = invites.find(token)
         cur = load_config()
+        if inv and inv.get("kind") == "account":
+            if cur["web_auth"] != "accounts":
+                return 404, invites.expired_page()
+            return 200, web.signup_page(inv)
         w = next((x for x in cur["watchers"] if inv and x["topic"] == inv["topic"]), None)
         if inv is None or w is None:
             return 404, invites.expired_page()
         return 200, invites.join_page(inv, w["name"], resolve_ntfy(cur)[2], cur["ntfy_server"],
                                       cur["ntfy_phone_mode"], commands.zone(w["time_zone"]))
+
+    def signup_post(token, form):
+        """A sign-up link's form: make the account (and its watcher), then sign
+        them in. Returns (code, page, account_id or None)."""
+        inv = invites.find(token)
+        if inv is None or inv.get("kind") != "account" or load_config()["web_auth"] != "accounts":
+            return 404, invites.expired_page(), None
+        name, username = form.get("name", "").strip(), form.get("username", "").strip()
+        again = lambda msg: (400, web.signup_page(inv, msg, name, username), None)  # noqa: E731
+        if form.get("password", "") != form.get("confirm", ""):
+            return again("The two passwords don't match.")
+        if not name:
+            return again("Type your name.")
+        inv = invites.claim(token, "account")
+        if inv is None:
+            return 404, invites.expired_page(), None
+        try:
+            made = accounts.create(username, name, form.get("password", ""), inv.get("role") or "member")
+        except accounts.AccountError as e:
+            invites.restore(inv)
+            return again(str(e))
+        if inv.get("watcher"):
+            try:
+                result = {}
+                edits.save_watcher(CONFIG_PATH, None, made["name"], "", result=result)
+                accounts.assign(result["topic"], made["id"])
+            except edits.EditError as e:  # e.g. the watcher limit: the account still works
+                log.warning("sign-up for %s: no watcher made: %s", made["username"], e)
+        hist.add("in", "", f"{made['name']} signed up with a link" + (f" from {inv['from']}" if inv.get("from") else ""),
+                 kind="web", status="received")
+        log.info("%s signed up with a sign-up link", made["username"])
+        wake.set()
+        return 303, "", made["id"]
+
+    def forgot(username):
+        """"Forgot password?": post a code to that person's own topics."""
+        a, code = accounts.start_reset(username)
+        if a is None:
+            return
+        topics = [w["topic"] for w in load_config()["watchers"] if w["topic"] in (a.get("watchers") or [])]
+        # In the background, so the reply takes as long whether or not the username exists.
+        for topic in topics:
+            threading.Thread(target=send, daemon=True, args=({"topic": topic, "title": "TailWatcher password reset", "tags": ["robot"], "priority": 4,
+                  "message": f"🔑 Your code is {code}. Someone asked to reset the TailWatcher password for "
+                             f"{a['username']}; if that wasn't you, ignore this. "
+                             f"It works for {accounts.RESET_MINUTES} minutes."},)).start()
+        log.info("password reset code for %s sent to %d topic(s)", a["username"], len(topics))
 
     def invite_post(data, mine):
         names = {w["topic"]: w["name"] for w in load_config()["watchers"]}
@@ -1351,6 +1404,18 @@ def run():
                     accounts.assign(result["topic"], made["id"])
                     msg += " Next: Connect phone on their watcher."
                     wake.set()
+            elif op == "link":
+                inv = invites.create_signup(viewer["account"]["name"], int(data.get("days") or invites.DEFAULT_DAYS),
+                                            data.get("role"), bool(data.get("watcher", True)))
+                hist.add("in", "", "Sign-up link created", kind="web", status="received")
+                return 200, {"ok": True, "message": "Sign-up link ready.", "path": f"join/{inv['token']}",
+                             "expires": inv["expires"]}
+            elif op == "unlink":
+                token = str(data.get("token") or "")
+                if not any(i.get("token") == token and i.get("kind") == "account" for i in invites.load()):
+                    return 404, {"ok": False, "message": "That link was already gone."}
+                invites.revoke(token)
+                return 200, {"ok": True, "message": "Sign-up link cancelled."}
             elif op == "edit":
                 if account_id == viewer["account"]["id"] and data.get("role") not in (None, "admin"):
                     return 400, {"ok": False, "message": "You can't remove your own admin role. Ask another admin."}
@@ -1572,7 +1637,7 @@ def run():
         return (400 if failed else 200), {"ok": not failed, "message": msg}
 
     web.serve(HEALTH_PORT, health, snapshot, mode=web_auth, post=handle_post, public=public_page,
-              before_login=prepare_accounts)
+              before_login=prepare_accounts, signup=signup_post, forgot=forgot)
 
     backoff, error_streak = 0, 0
     while True:

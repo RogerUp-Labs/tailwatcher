@@ -78,6 +78,39 @@ class AccountsTest(unittest.TestCase):
         self.assertIsNotNone(accounts.authenticate("mom", "reset-in-actions", self.path))
         self.assertIsNone(accounts.session(token))  # signed out everywhere
 
+    def test_reset_by_code(self):
+        accounts._resets.clear()
+        kid = accounts.create("kid", "Kid", "kid-password", "member", ["tw-kid"], self.path)
+        self.assertEqual(accounts.start_reset("nobody", self.path), (None, None))
+        a, code = accounts.start_reset("KID", self.path, now=1000)
+        self.assertEqual(a["id"], kid["id"])
+        self.assertEqual(accounts.start_reset("kid", self.path, now=1030), (None, None))  # one a minute
+        token = accounts.new_session(kid["id"])
+        with self.assertRaises(accounts.AccountError):
+            accounts.finish_reset("kid", code, "short", self.path, now=1040)  # weak password: code still good
+        wrong = "000000" if code != "000000" else "111111"
+        with self.assertRaises(accounts.AccountError):
+            accounts.finish_reset("kid", wrong, "new-password", self.path, now=1040)
+        accounts.finish_reset("kid", code[:3] + " " + code[3:], "new-password", self.path, now=1050)
+        self.assertIsNotNone(accounts.authenticate("kid", "new-password", self.path))
+        self.assertIsNone(accounts.session(token))  # signed out everywhere
+        with self.assertRaises(accounts.AccountError):
+            accounts.finish_reset("kid", code, "newer-password", self.path, now=1060)  # used once
+
+    def test_reset_codes_expire_and_run_out(self):
+        accounts._resets.clear()
+        accounts.create("kid", "Kid", "kid-password", path=self.path)
+        _, code = accounts.start_reset("kid", self.path, now=1000)
+        with self.assertRaises(accounts.AccountError):
+            accounts.finish_reset("kid", code, "new-password", self.path, now=1000 + 11 * 60)
+        _, code = accounts.start_reset("kid", self.path, now=2000)
+        wrong = "000000" if code != "000000" else "111111"
+        for _ in range(accounts.RESET_TRIES):
+            with self.assertRaises(accounts.AccountError):
+                accounts.finish_reset("kid", wrong, "new-password", self.path, now=2001)
+        with self.assertRaises(accounts.AccountError):
+            accounts.finish_reset("kid", code, "new-password", self.path, now=2002)  # too many tries: gone
+
     def test_sessions(self):
         token = accounts.new_session("a_1", now=1000)
         with open(self.ses) as f:

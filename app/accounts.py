@@ -14,6 +14,11 @@ so a copy of /data can't be replayed as a login. The server owner can still
 read every file in /data: accounts keep trips private from other household
 members, not from whoever runs the server.
 
+Anyone can also reset their own password with a 6-digit code that
+start_reset() makes and TailWatcher posts to their watchers' ntfy topics:
+a topic is secret and lives on that person's phone, so it stands in for an
+email inbox (0.23.0). Codes live in memory only.
+
 "recovery" is how a locked-out admin gets back in without email: StartOS's
 "Reset Web UI Password" action (or `tailwatcher.py reset-password` on Docker)
 writes a new password to webui.json, and sync_recovery() sees that it changed
@@ -340,6 +345,55 @@ def end_for(account_id, path=None, keep=None):
                 if v.get("account") != account_id or (keep and k == _key(keep))}
         if len(left) != len(sessions):
             _save_sessions(left, path)
+
+
+# ------------------------------------------------------- reset by code
+
+RESET_MINUTES = 10
+RESET_TRIES = 5
+RESET_GAP = 60  # seconds between codes for one username, so nobody can flood a topic
+_resets = {}
+
+
+def start_reset(username, path=None, now=None):
+    """(account, code) for a "Forgot password?" request, or (None, None) when
+    there's no such account or a code went out under a minute ago."""
+    u = (username or "").strip().lower()
+    now = now or time.time()
+    a = next((x for x in load(path)["accounts"] if x["username"] == u), None)
+    if a is None:
+        return None, None
+    with LOCK:
+        r = _resets.get(u)
+        if r and now - r["sent"] < RESET_GAP:
+            return None, None
+        code = f"{secrets.randbelow(10 ** 6):06d}"
+        _resets[u] = {"code": code, "sent": now, "expires": now + RESET_MINUTES * 60, "tries": 0}
+    return public(a), code
+
+
+def finish_reset(username, code, password, path=None, now=None):
+    """Set a new password with a code from start_reset(). Signs the account
+    out everywhere and returns it; raises AccountError otherwise."""
+    u = (username or "").strip().lower()
+    now = now or time.time()
+    check_new_password(password)
+    with LOCK:
+        r = _resets.get(u)
+        if r is None or r["expires"] <= now:
+            _resets.pop(u, None)
+            raise AccountError("That code has expired. Ask for a new one.")
+        if not hmac.compare_digest((code or "").strip().replace(" ", ""), r["code"]):
+            r["tries"] += 1
+            if r["tries"] >= RESET_TRIES:
+                _resets.pop(u, None)
+                raise AccountError("Too many wrong codes. Ask for a new one.")
+            raise AccountError("That code didn't match. Check the latest alert and try again.")
+        _resets.pop(u, None)
+        a = next((x for x in load(path)["accounts"] if x["username"] == u), None)
+        if a is None:
+            raise AccountError("That account no longer exists.")
+    return update(a["id"], password=password, path=path)
 
 
 class Throttle:
