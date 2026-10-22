@@ -227,16 +227,23 @@ class DockerTest(unittest.TestCase):
                 json.dump(data, f)
         return p
 
-    def test_password_defaults_on_only_for_docker(self):
-        missing, chosen = self.path("none.json"), self.path("c.json", {"webPassword": False})
+    def test_sign_in_modes(self):
+        missing = self.path("none.json")
+        old_off, old_on = self.path("c.json", {"webPassword": False}), self.path("d.json", {"webPassword": True})
+        existing = self.path("e.json", {"watchers": [{"name": "Me", "topic": "tw-me"}]})
+        chosen = self.path("f.json", {"webAuth": "accounts", "webPassword": False})
         tw.PLATFORM = "startos"
-        self.assertFalse(tw.web_password_required(missing))
-        self.assertFalse(tw.load_config(missing)["web_password"])
+        self.assertEqual(tw.web_auth(missing), "off")
+        self.assertEqual((tw.load_config(missing)["web_auth"], tw.load_config(missing)["needs_setup"]), ("off", True))
+        self.assertEqual((tw.load_config(existing)["web_auth"], tw.load_config(existing)["needs_setup"]), ("off", False))
         tw.PLATFORM = "docker"
-        self.assertTrue(tw.web_password_required(missing))
-        self.assertTrue(tw.load_config(missing)["web_password"])
-        self.assertFalse(tw.web_password_required(chosen))   # turned off in Settings stays off
-        self.assertFalse(tw.load_config(chosen)["web_password"])
+        self.assertEqual(tw.web_auth(missing), "password")  # a new Docker install is locked until set up
+        self.assertTrue(tw.load_config(missing)["needs_setup"])
+        self.assertEqual(tw.web_auth(existing), "password")
+        self.assertEqual(tw.web_auth(old_off), "off")   # turned off in Settings stays off
+        self.assertEqual(tw.web_auth(old_on), "password")
+        self.assertFalse(tw.load_config(old_off)["needs_setup"])
+        self.assertEqual(tw.web_auth(chosen), "accounts")  # webAuth wins over the 0.21 key
 
     def test_ensure_password(self):
         import web

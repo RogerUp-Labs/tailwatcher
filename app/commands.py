@@ -290,7 +290,7 @@ def apply_command(path, topic, text, status=None, now=None):
         watcher = next((w for w in raw.get("watchers") or [] if w.get("topic") == topic), None)
         if watcher is None:
             return None, False
-        verb, ident_in, label, expires = parse(text, now, raw.get("timeZone") or DEFAULT_TZ)
+        verb, ident_in, label, expires = parse(text, now, watcher.get("timeZone") or raw.get("timeZone") or DEFAULT_TZ)
         if verb == "list":
             return format_list(watcher, status, now), False
         if verb == "help":

@@ -4,10 +4,11 @@ TailWatcher sends push notifications to the people in your household when a plan
 
 ## Getting started
 
-1. Open TailWatcher's **Web UI** and tap **+ Add watcher** for each person who should get alerts. A name is all it needs.
-2. Tap **Connect phone** on that watcher and send them the link (see **Connecting a phone**).
-3. Add what they want to follow with **+ Aircraft**: a tail number like `N12345` or a flight number like `UA1234`. They can also text these in themselves (see **Text commands**).
-4. Optional: add a free **AeroDataBox** key in **⚙ Settings** so trips find the plane flying in for your flight on their own.
+1. Open TailWatcher's **Web UI**. The first time, it asks how people will sign in: no sign-in, one shared password, or **family accounts** so each person has their own login (see **Family accounts**). You can change it later in **⚙ Settings**.
+2. Tap **+ Add watcher** for each person who should get alerts. A name is all it needs.
+3. Tap **Connect phone** on that watcher and send them the link (see **Connecting a phone**).
+4. Add what they want to follow with **+ Aircraft**: a tail number like `N12345` or a flight number like `UA1234`. They can also text these in themselves (see **Text commands**).
+5. Optional: add a free **AeroDataBox** key in **⚙ Settings** so trips find the plane flying in for your flight on their own.
 
 Nothing else is needed: alerts go through the public ntfy.sh service by default, so there's no NTFY package, account or token to set up. To keep alerts on your own server instead, see **Settings and where alerts go**.
 
@@ -134,17 +135,47 @@ Instead of typing flight numbers, tap **Import** next to **+ Add trip** and past
 
 Your trip alerts are about the plane coming to get *you*; family usually wants to know when your flight leaves and lands. Tick their names under **Share with** on the trip form, or text `share 1 Mom & Dad`.
 
+With **family accounts**, the list shows everyone on this TailWatcher by name, and the trip also appears under **Shared with me** on their dashboard: your flight, where it is once it's in the air, and the plane flying in for it. They can't change it. **Stop following** there takes them off it and lets you know.
+
 They get a note that you shared a flight, a heads-up if the time changes or the flight disappears (with an AeroDataBox key), and departure and landing alerts on the day. They don't get your inbound-plane updates. TailWatcher follows your flight only around departure, so a flight shared weeks ahead won't alert on the other days it flies. Changing or cancelling the trip updates them too. Sharing a round trip or connecting flights covers every flight, with one note listing them all. When you land somewhere to change planes, their landing alert says which flight you're connecting to.
 
 ## Looking up a plane
 
 `info N12345` works for any aircraft, watched or not, and replies with what it is, its owner and registration (US N-numbers, from the FAA registry: city and state only; the **FAA record** button has the rest), its engine, where it is right now, and a photo when one exists. `info UA1234` looks up whichever plane is flying that flight right now. Flags show military aircraft and planes hidden from FlightAware and Flightradar24.
 
+## Family accounts
+
+Family accounts give each person their own login, so they see only their own watchers and trips. Trips are the private part: nobody else in the household sees where you're flying unless you share the trip with them.
+
+1. Turn it on at first setup or in **⚙ Settings → Signing in to this page → Family accounts**. You pick your own username and password and become the first admin. Every existing watcher starts out as yours.
+2. Open **👥 People** and tap **+ Add person** for each family member: a username, their name and a temporary password. **Make them a watcher too** gives them their own alerts and trips.
+3. Already had a watcher for them? Pick their name next to it under **People** to move it to their account. Tick **give it a new topic** first if your phone was subscribed to it, so your phone stops getting their alerts.
+4. Send them the address of this page with their username and temporary password. They can change it, and their name and time zone, under **👤 My account**.
+
+What each person sees:
+
+| | Their own | Shared with them | An admin who isn't them |
+|---|---|---|---|
+| Watchers and planes | See and change | No | Names only (People) |
+| Trips | See, change, share | Read only, under **Shared with me** | No |
+| Activity | Their own alerts and texts | No | No |
+| ⚙ Settings, People | Admins only | | |
+
+A parent can look after a child's or grandparent's watcher from their own login: move it to their account. One account can have several watchers.
+
+Good to know:
+
+- Accounts keep things private from other people in the household, not from whoever runs the server, who can read TailWatcher's files.
+- A person's phone talks to ntfy, not to TailWatcher, so anyone subscribed to their topic still gets their alerts and can text commands to it. Their topic and **Connect phone** link only show on their own dashboard.
+- Forgot a password? An admin sets a new one with **Reset password** on the People page. For the admin, see **I lost a password**.
+- Each person can have their own time zone (**My account**, or **Time zone** when editing a watcher). Their alerts, replies and "until fri" use it, and shared-trip alerts come in the recipient's time zone.
+
 ## Using the dashboard
 
-The Web UI shows everyone's watchers and trips in one place:
+The Web UI shows the watchers and trips you can see (everyone's, unless family accounts are on) in one place:
 
-- **Trips:** route, departure, the plane flying in, how far along it is, and when TailWatcher checks next
+- **Trips:** route, departure, the plane flying in (and roughly where it is), how far along it is, and when TailWatcher checks next
+- **Shared with me:** trips other people shared with you, when there are any
 - **Watchers:** each person's planes and flights, what's airborne now, and live-map links. A plane that landed and went quiet shows **Parked** with when it was last seen, and its live-map link comes back when it's on the radar again. Next to the live-map link is roughly where the plane is ("near Denver, CO", "40 nm NE of Denver, CO", or the airport it's at), or where it was last seen
 - **Activity:** recent alerts, replies, text commands and edits
 - **System:** whether notifications, text commands and trip lookups are working
@@ -161,7 +192,8 @@ Add and change things right on the page: **+ Add trip**, **+ Add watcher**, **+ 
     - **Another ntfy server**, at an address you enter.
 - **AeroDataBox key** (optional): for trips that find their plane automatically. Subscribe to the free Basic plan at rapidapi.com/aedbx-aedbx/api/aerodatabox and paste the key.
 - **ADS-B feed** and **Check every**: adsb.fi is the default. All planes are checked together, one request per cycle.
-- **Time zone**, **map buttons**, **text commands**, and **Require a password for this page** (get it from **Actions → Show Web UI Password**).
+- **Time zone** (the default; each watcher can have their own), **map buttons** and **text commands**.
+- **Signing in to this page:** no sign-in, **one shared password** (from **Actions → Show Web UI Password**), or **family accounts** (see **Family accounts**). Only admins see Settings.
 
 ## Running without a Start9
 
@@ -169,7 +201,7 @@ TailWatcher also runs as an ordinary Docker container: on a Synology, Unraid or 
 
 1. Get **docker-compose.yml** from the `docker` folder of github.com/RogerUp-Labs/tailwatcher.
 2. Start it. On a Synology: **Container Manager → Project → Create**, pick a folder (for example `/docker/tailwatcher`), choose **Upload docker-compose.yml**, and finish. Elsewhere: `docker compose up -d` in the folder with the file.
-3. Find the dashboard password in the container's log (Container Manager → Container → tailwatcher → **Log**), then open `http://<your NAS>:8080` with any username and that password.
+3. Find the dashboard password in the container's log (Container Manager → Container → tailwatcher → **Log**), then open `http://<your NAS>:8080` and sign in with it. The first time, choose how people sign in from then on.
 4. Carry on with **Getting started**. Alerts use ntfy.sh unless you change it.
 
 Settings that StartOS would fill in are set in docker-compose.yml instead:
@@ -184,7 +216,8 @@ Settings that StartOS would fill in are set in docker-compose.yml instead:
 Good to know:
 
 - Everything TailWatcher keeps (watchers, trips, history) is in the `data` folder next to docker-compose.yml. Back it up; there is no StartOS backup.
-- The dashboard password is on by default with Docker, since a NAS port can be reachable from more places than a Start9's. You can turn it off in **⚙ Settings**.
+- The dashboard password is on by default with Docker, since a NAS port can be reachable from more places than a Start9's. You can turn it off, or switch to family accounts, in **⚙ Settings**.
+- `docker exec tailwatcher python /app/tailwatcher.py accounts` lists the family accounts, and `reset-password USERNAME` gives one a new password.
 - An ntfy server that allows anonymous publishing needs no token. If yours requires logins, either paste a token in **⚙ Settings** or use **Set up NTFY for me** with its admin password.
 - To update: Container Manager → Project → tailwatcher → **Action → Build** (or `docker compose pull && docker compose up -d`).
 
@@ -275,6 +308,8 @@ Check the key in **⚙ Settings** (paste it again to replace it). The free plan 
 ### I lost a password
 
 - **The dashboard password:** StartOS → TailWatcher → **Actions → Show Web UI Password** (or **Reset Web UI Password**). With Docker, it's in the container's log, or run `docker exec tailwatcher python /app/tailwatcher.py password` (`reset-password` makes a new one).
+- **Your family account:** ask an admin to use **Reset password** on the People page.
+- **The admin's family account:** StartOS → TailWatcher → **Actions → Reset Web UI Password** makes a new password for the first admin; sign in with it and change it under **My account**. With Docker, run `docker exec tailwatcher python /app/tailwatcher.py reset-password USERNAME`.
 - **NTFY's admin password:** NTFY → **Actions → Reset User Password** → admin.
 
 ## Good to know

@@ -20,6 +20,7 @@ the default), local (NTFY_URL) or custom ("ntfyCustomUrl").
 """
 
 import csv
+import hashlib
 import json
 import logging
 import math
@@ -31,6 +32,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import accounts
 import commands
 import edits
 import flights
@@ -47,7 +49,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.21.1"
+VERSION = "0.22.0"
 # "startos" (main.ts sets it) or "docker" (the Dockerfile's default): only
 # changes setup hints and whether the dashboard password starts on.
 PLATFORM = os.environ.get("TW_PLATFORM", "startos")
@@ -101,6 +103,7 @@ def load_config(path=CONFIG_PATH, now=None):
             "priority": raw.get("priority", "default"),
         }]
 
+    time_zone = raw.get("timeZone") or commands.DEFAULT_TZ
     watchers = []
     for w in watchers_raw or []:
         topic = (w.get("topic") or "").strip()
@@ -131,7 +134,12 @@ def load_config(path=CONFIG_PATH, now=None):
                 "aircraft": aircraft,
                 "notify_landing": bool(w.get("notifyLanding", False)),
                 "priority": w.get("priority") or "default",
+                # Their own time zone (0.22.0) for alerts, replies and "until fri";
+                # blank = the server's. tz_set is what's stored, for the edit form.
+                "time_zone": w.get("timeZone") or time_zone,
+                "tz_set": w.get("timeZone") or "",
             })
+    web_auth, needs_setup = auth_mode(raw)
 
     return {
         "watchers": watchers,
@@ -140,16 +148,34 @@ def load_config(path=CONFIG_PATH, now=None):
         "map_links": raw.get("mapLinks") or "adsbx",
         "data_source": raw.get("dataSource") or "adsb.fi",
         "text_commands": bool(raw.get("textCommands", True)),
-        "time_zone": raw.get("timeZone") or commands.DEFAULT_TZ,
+        "time_zone": time_zone,
         # Installs from before 0.12 used this server's NTFY with a token.
         "ntfy_server": raw.get("ntfyServer") or ("local" if raw.get("ntfyToken") else "public"),
         "ntfy_custom_url": (raw.get("ntfyCustomUrl") or "").strip(),
         "ntfy_phone_mode": raw.get("ntfyPhoneMode") or "open",
         "adb_key": (raw.get("aerodataboxKey") or "").strip(),
-        # Off by default on StartOS (LAN/VPN only); on for a plain Docker install,
-        # whose port may be forwarded anywhere.
-        "web_password": bool(raw.get("webPassword", PLATFORM != "startos")),
+        "web_auth": web_auth,
+        "needs_setup": needs_setup,
     }
+
+
+AUTH_MODES = ("off", "password", "accounts")
+
+
+def auth_mode(raw):
+    """(sign-in mode, needs first setup) from config.json.
+
+    "webAuth" (0.22.0) is off / password / accounts. Before it, "webPassword"
+    was on or off; an install with neither predates both and keeps the
+    platform's old default: off on StartOS (LAN/VPN only), the shared
+    password on Docker (whose port may be forwarded anywhere). A brand-new
+    install asks at first setup, gated meanwhile by that same default."""
+    default = "off" if PLATFORM == "startos" else "password"
+    if raw.get("webAuth") in AUTH_MODES:
+        return raw["webAuth"], False
+    if "webPassword" in raw:
+        return ("password" if raw["webPassword"] is True else "off"), False
+    return default, not (raw.get("watchers") or raw.get("aircraft"))
 
 
 def subscriptions(cfg):
@@ -469,15 +495,37 @@ def poll_all(source, wanted, fetch=fetch_many):
     return {}, "; ".join(problems), limited
 
 
-def web_password_required(path=CONFIG_PATH):
-    """Read straight from config.json on each request, so turning the password
-    on in Configure applies at once rather than at the next poll cycle."""
-    default = PLATFORM != "startos"
+def web_auth(path=CONFIG_PATH):
+    """The sign-in mode, read straight from config.json on each request, so a
+    change in Configure applies at once rather than at the next poll cycle."""
     try:
         with open(path) as f:
-            return json.load(f).get("webPassword", default) is True
-    except (OSError, ValueError, AttributeError):
-        return default
+            raw = json.load(f)
+    except (OSError, ValueError):
+        raw = {}
+    return auth_mode(raw if isinstance(raw, dict) else {})[0]
+
+
+def wid(topic):
+    """A watcher's id for the Web UI where its topic must stay hidden (share
+    lists, the People page): with accounts, a topic is the key to someone's
+    alerts and text commands, so other people only ever see this."""
+    return "w" + hashlib.sha256(("tw-wid:" + topic).encode()).hexdigest()[:12]
+
+
+def scope(viewer, cur, data=None):
+    """The topics of the watchers this viewer sees and edits: all of them
+    unless they signed in with an account; then their own, plus (for admins)
+    any watcher nobody owns yet, e.g. one added in StartOS Configure."""
+    topics = {w["topic"] for w in cur["watchers"]}
+    if not viewer or not viewer.get("account"):
+        return topics
+    data = data or accounts.load()
+    me = next((a for a in data["accounts"] if a["id"] == viewer["account"]["id"]), None)
+    mine = set(me.get("watchers") or []) if me else set()
+    if viewer.get("admin"):
+        mine |= {t for t in topics if accounts.owner_of(t, data) is None}
+    return mine & topics
 
 
 def config_mtime():
@@ -534,9 +582,15 @@ def run():
     )
     if PLATFORM != "startos":  # StartOS init writes it and shows it in Actions
         password = web.ensure_password(wanted=os.environ.get("TAILWATCHER_PASSWORD"))
-        if web_password_required():
-            log.info("Web UI password: %s (any username; change it with TAILWATCHER_PASSWORD, "
+        if web_auth() == "password":
+            log.info("Web UI password: %s (change it with TAILWATCHER_PASSWORD, "
                      "or run: docker exec tailwatcher python /app/tailwatcher.py reset-password)", password)
+        elif web_auth() == "accounts":
+            log.info("Web UI: family accounts. Locked out? docker exec tailwatcher python /app/tailwatcher.py "
+                     "reset-password USERNAME")
+        if load_config()["needs_setup"]:
+            log.info("New install: open the Web UI to choose how people sign in (the password above gets you in).")
+    prepare_accounts()
     health = Health()
     hist = history.History()
     ntfy_url, ntfy_token, phone_url = resolve_ntfy(load_config())
@@ -550,6 +604,10 @@ def run():
     topic_errors, listen_errors = {}, {}
     # Set by a text command that changed the list, to poll right away.
     wake = threading.Event()
+
+    def tz(topic):
+        """A watcher's time zone (their own, else the server's)."""
+        return next((w["time_zone"] for w in cfg["watchers"] if w["topic"] == topic), cfg["time_zone"])
 
     def on_info(topic, ident_in):
         """Answer "info N12345" / "info UA1234" with a full aircraft lookup."""
@@ -596,7 +654,7 @@ def run():
         """Answer "inbound UA1234 [N38473] [dep 4:30pm] [then UA567 …] [return UA5678 11/21 …]"
         by starting a trip (or every flight of a journey)."""
         now = time.time()
-        legs = trips.parse_itinerary(text, now, cfg["time_zone"], airports)
+        legs = trips.parse_itinerary(text, now, tz(topic), airports)
         if isinstance(legs, str):
             return legs
         replies = []
@@ -612,7 +670,7 @@ def run():
                 first_back = trip["leg"] == "return" and legs[n - 1]["leg"] != "return"
                 return err if not n else trips.about_return(err) if first_back else trips.about_leg(err, "Connection")
             prev = legs[n - 1] if n and legs[n - 1]["leg"] == trip["leg"] else None
-            replies.append(note or trips.describe(trip, cfg["time_zone"], prev=prev))
+            replies.append(note or trips.describe(trip, tz(topic), prev=prev))
         if len(legs) == 1:
             trips.add(legs[0])
         else:
@@ -624,14 +682,14 @@ def run():
         """Answer "return 1 UA5678 11/21 …" by adding the flight home to trip 1."""
         now = time.time()
         mine = trips.for_topic(topic)
-        out, rest = trips.select(mine, text, now, cfg["time_zone"])
+        out, rest = trips.select(mine, text, now, tz(topic))
         if out is None:
             return rest
         legs = trips.journey(out, mine)
         if trips.is_round_trip(legs):
             return (f"🤷 {out['flight']} already has a return flight. Change it with \"change …\" "
                     "(send \"trips\" for the numbers).")
-        ret = trips.parse_return(legs[-1], rest, now, cfg["time_zone"], airports)
+        ret = trips.parse_return(legs[-1], rest, now, tz(topic), airports)
         if isinstance(ret, str):
             return ret
         ret["topic"] = topic
@@ -644,13 +702,13 @@ def run():
         if ret["shared_with"]:
             announce_share({t: [ret] for t in ret["shared_with"]}, topic)
         wake.set()
-        return f"↩ Added the flight home to {out['flight']}.\n" + (note or trips.describe(ret, cfg["time_zone"]))
+        return f"↩ Added the flight home to {out['flight']}.\n" + (note or trips.describe(ret, tz(topic)))
 
     def on_connect(topic, text):
         """Answer "connect 1 UA567 [dep 2:10pm] …" by adding a connecting flight after trip 1."""
         now = time.time()
         mine = trips.for_topic(topic)
-        prev, rest = trips.select(mine, text, now, cfg["time_zone"])
+        prev, rest = trips.select(mine, text, now, tz(topic))
         if prev is None:
             return rest
         nxt = trips.connects_to(prev, mine)
@@ -658,7 +716,7 @@ def run():
             number = next(i for i, x in enumerate(mine, 1) if x is nxt)
             return (f"🤷 {prev['flight']} already connects to {nxt['flight']}. To add a flight after that one, "
                     f"send \"connect {number} …\".")
-        conn = trips.parse_connection(prev, rest, now, cfg["time_zone"], airports)
+        conn = trips.parse_connection(prev, rest, now, tz(topic), airports)
         if isinstance(conn, str):
             return conn
         conn["topic"] = topic
@@ -672,7 +730,7 @@ def run():
             announce_share({t: [conn] for t in conn["shared_with"]}, topic)
         wake.set()
         return (f"🔗 Added {conn['flight']} as your connection after {prev['flight']}.\n"
-                + (note or trips.describe(conn, cfg["time_zone"], prev=stored)))
+                + (note or trips.describe(conn, tz(topic), prev=stored)))
 
     def adb_refresh(trip, now):
         """Look a trip up on AeroDataBox right away (when added or changed): a
@@ -684,7 +742,7 @@ def run():
 
     def on_change(trip, rest):
         now = time.time()
-        err, needs_lookup = trips.apply_change(trip, rest, now, cfg["time_zone"], airports)
+        err, needs_lookup = trips.apply_change(trip, rest, now, tz(trip["topic"]), airports)
         if err:
             return err, True
         note = ""
@@ -694,17 +752,17 @@ def run():
             except trips.AdbError as e:
                 note = f"\n(Couldn't check AeroDataBox: {e}.)"
         wake.set()
-        return "✏️ Updated.\n" + trips.describe(trip, cfg["time_zone"], intro=False) + note, True
+        return "✏️ Updated.\n" + trips.describe(trip, tz(trip["topic"]), intro=False) + note, True
 
     def on_cancel(legs, rest):
-        tz = cfg["time_zone"]
+        zone = tz(legs[0]["topic"])
         if len(legs) == 2 and trips.is_round_trip(legs):
-            return (f"🗑 Stopped tracking {legs[0]['flight']} on {trips.fmt_day(legs[0], tz)} and the "
-                    f"return {legs[1]['flight']} on {trips.fmt_day(legs[1], tz)}."), False
+            return (f"🗑 Stopped tracking {legs[0]['flight']} on {trips.fmt_day(legs[0], zone)} and the "
+                    f"return {legs[1]['flight']} on {trips.fmt_day(legs[1], zone)}."), False
         if len(legs) > 1:
-            names = [f"{t['flight']} ({trips.fmt_day(t, tz)})" for t in legs]
+            names = [f"{t['flight']} ({trips.fmt_day(t, zone)})" for t in legs]
             return f"🗑 Stopped tracking {', '.join(names[:-1])} and {names[-1]}.", False
-        return f"🗑 Stopped tracking {legs[0]['flight']} on {trips.fmt_day(legs[0], tz)}.", False
+        return f"🗑 Stopped tracking {legs[0]['flight']} on {trips.fmt_day(legs[0], zone)}.", False
 
     def announce_share(added, owner_topic):
         """Tell newly added people a trip was shared with them: {topic: [legs]},
@@ -713,7 +771,7 @@ def run():
         owner = names.get(owner_topic, {}).get("name") or owner_topic
         for topic, legs in added.items():
             if topic in names:
-                title, message, priority = trips.share_announcement(legs, owner, cfg["time_zone"])
+                title, message, priority = trips.share_announcement(legs, owner, tz(topic))
                 send({"topic": topic, "title": title, "message": message, "tags": ["robot"], "priority": priority})
 
     def set_share(topic, selector, topics=None, add=None, drop=None):
@@ -734,7 +792,7 @@ def run():
             return ("🔗 " + flights_ + (f" {verb} shared with " + ", ".join(who) + "." if who
                                         else f" {verb}n't shared with anyone."), True)
 
-        reply = trips.modify_legs(topic, selector, apply, time.time(), cfg["time_zone"])
+        reply = trips.modify_legs(topic, selector, apply, time.time(), tz(topic))
         if added:
             announce_share(added, topic)
         return reply
@@ -743,13 +801,17 @@ def run():
         """Text commands "share 1 Mom & Dad" / "unshare 1 Mom & Dad" (add "only"
         to leave the other flight of a round trip as it is)."""
         mine = trips.for_topic(topic)
-        trip, rest = trips.select(mine, text, time.time(), cfg["time_zone"])
+        trip, rest = trips.select(mine, text, time.time(), tz(topic))
         if trip is None:
             return rest
         rest, only = trips.split_only(rest)
         want = rest.strip().lower()
         match = [w for w in load_config()["watchers"]
                  if w["topic"] != topic and want in (w["name"].lower(), w["topic"].lower())]
+        if not match:  # with family accounts, a person's name or username finds their first watcher
+            person = next((a for a in accounts.load()["accounts"] if want in (a["name"].lower(), a["username"])), None)
+            match = [w for w in load_config()["watchers"]
+                     if person and w["topic"] in person.get("watchers", [])[:1] and w["topic"] != topic]
         if not match:
             others = ", ".join(w["name"] for w in load_config()["watchers"] if w["topic"] != topic) or "nobody yet"
             return f"🤷 No watcher called \"{rest.strip()}\". You can share with: {others}."
@@ -775,13 +837,13 @@ def run():
             elif verb == "connect":
                 reply = on_connect(topic, ident)
             elif verb == "trips":
-                reply = trips.describe_all(trips.for_topic(topic), cfg["time_zone"])
+                reply = trips.describe_all(trips.for_topic(topic), tz(topic))
             elif verb == "change":
-                reply = trips.modify(topic, ident, on_change, now, cfg["time_zone"])
+                reply = trips.modify(topic, ident, on_change, now, tz(topic))
             elif verb in ("share", "unshare"):
                 reply = on_share(topic, ident, verb == "share")
             else:
-                reply = trips.modify_legs(topic, ident, on_cancel, now, cfg["time_zone"])
+                reply = trips.modify_legs(topic, ident, on_cancel, now, tz(topic))
             log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0])
             send({"topic": where, "message": reply, "tags": ["robot"], "priority": 2})
             return
@@ -799,7 +861,7 @@ def run():
         if reply and verb == "list":
             mine = trips.for_topic(topic)
             if mine:
-                reply += "\n\n" + trips.describe_all(mine, cfg["time_zone"])
+                reply += "\n\n" + trips.describe_all(mine, tz(topic))
         log.info("command on %s: %r → %s", topic, text, reply.splitlines()[0] if reply else "ignored")
         if reply:
             send({"topic": where, "message": reply, "tags": ["robot"], "priority": 2})
@@ -874,11 +936,13 @@ def run():
                              "priority": priority,
                              "click": f"https://globe.adsbexchange.com/?icao={hexcode}" if hexcode else None})
 
-        def to_shared(t, title, message, priority):
+        def to_shared(t, build):
+            """build(time zone) -> messages, written in each recipient's own zone."""
             for topic in t.get("shared_with") or []:
                 if topic in by_topic:
-                    outgoing.append({"topic": topic, "title": title, "message": message,
-                                     "tags": ["airplane"], "priority": priority})
+                    for title, message, priority in build(tz(topic)):
+                        outgoing.append({"topic": topic, "title": title, "message": message,
+                                         "tags": ["airplane"], "priority": priority})
 
         with trips.TRIPS_LOCK:
             now = time.time()
@@ -908,14 +972,13 @@ def run():
                     continue
                 mine = trips.ordered([x for x in active if x["topic"] == t["topic"]])
                 number = next(i for i, x in enumerate(mine, 1) if x is t)
-                for m in trips.change_messages(t, notes, cfg["time_zone"], number):
+                for m in trips.change_messages(t, notes, tz(t["topic"]), number):
                     to_owner(t, *m)
                 owner = by_topic[t["topic"]]["name"]
-                for m in trips.share_note_messages(t, notes, owner, cfg["time_zone"]):
-                    to_shared(t, *m)
+                to_shared(t, lambda zone, t=t, notes=notes, owner=owner: trips.share_note_messages(t, notes, owner, zone))
             for t in active:
                 nxt = trips.connects_to(t, active)
-                for m in trips.connection_notes(t, nxt, cfg["time_zone"]) if nxt else []:
+                for m in trips.connection_notes(t, nxt, tz(t["topic"])) if nxt else []:
                     changed = True
                     to_owner(t, *m)
 
@@ -925,7 +988,11 @@ def run():
                 k = trips.inbound_key(t)
                 if not k or k[1] not in fixes:
                     continue
-                msgs = trips.step(t, fixes[k[1]], now, airports, cfg["time_zone"],
+                if fixes[k[1]] is not None:  # where the plane is, for the dashboard
+                    f = fixes[k[1]]
+                    t["inbound_fix"], changed = {"lat": f.get("lat"), "lon": f.get("lon"), "alt_baro": f.get("alt_baro"),
+                                                 "hex": f.get("hex"), "at": now}, True
+                msgs = trips.step(t, fixes[k[1]], now, airports, tz(t["topic"]),
                                   lambda trip, cs: trips.route_destination(trip, cs, USER_AGENT))
                 if msgs:
                     changed = True
@@ -944,7 +1011,7 @@ def run():
                 kind = trips.own_event(t, event, ac, airports)
                 nxt = trips.connects_to(t, active)
                 if nxt:
-                    for m in trips.connection_step(t, nxt, fix, kind, now, airports, cfg["time_zone"]):
+                    for m in trips.connection_step(t, nxt, fix, kind, now, airports, tz(t["topic"])):
                         to_owner(t, *m, hexcode=st.get("hex"))
                 if not kind:
                     continue
@@ -956,7 +1023,7 @@ def run():
                                             ac, alert, airports, "flight")
                         if kind == "landed" and nxt:
                             msg["message"] += f"\nConnecting to {nxt['flight']}" + (
-                                f", departs {trips.fmt_time(nxt['dep_time'], cfg['time_zone'])}"
+                                f", departs {trips.fmt_time(nxt['dep_time'], tz(topic))}"
                                 if nxt.get("dep_time") else "") + "."
                         outgoing.append(msg)
             if changed:
@@ -967,17 +1034,36 @@ def run():
                 retry_queue.append({"payload": payload, "until": time.time() + RETRY_SECONDS})
         return False
 
-    def snapshot():
-        """Everything the web UI shows. Read-only; secrets are left out.
+    def snapshot(viewer=None):
+        """Everything the web UI shows this viewer. Read-only; secrets are left out.
+
+        With family accounts that's only their own watchers (plus, for admins,
+        any nobody owns yet), their trips, trips shared with them, and the
+        names of everyone else for sharing; never other people's topics.
 
         Reads config.json fresh rather than using `cfg`, which only refreshes
         at the top of a poll cycle: an edit made a second ago (or during a
         rate-limit backoff) must show up right away."""
         now, st, cur = time.time(), load_state(), load_config()
+        data = accounts.load()
         names = {w["topic"]: w["name"] for w in cur["watchers"]}
+        mine = scope(viewer, cur, data)
+        admin = not viewer or viewer.get("admin")
+        me = (viewer or {}).get("account")
         home = home_topics(cur)
+        zone_of = {w["topic"]: w["time_zone"] for w in cur["watchers"]}
+        own_zone = next((zone_of[t] for t in (me or {}).get("watchers") or [] if t in zone_of), cur["time_zone"])
+
+        def where(fix, at):
+            """Plain-text position of a fix stored at `at`, if it's recent."""
+            if not fix or now - (at or 0) > GAP_SECONDS:
+                return None
+            return airports.place(fix.get("lat"), fix.get("lon"), fix.get("alt_baro") == "ground")
+
         watchers_out = []
         for w in cur["watchers"]:
+            if w["topic"] not in mine:
+                continue
             aircraft = []
             for a in w["aircraft"]:
                 s_ = st.get(a["key"]) or {}
@@ -991,26 +1077,41 @@ def run():
                     "hex": s_.get("hex"), "alt": fix.get("alt_baro"), "gs": fix.get("gs"),
                     "where": airports.place(fix.get("lat"), fix.get("lon"), fix.get("alt_baro") == "ground"),
                     "callsign": (fix.get("flight") or "").strip(), "type": fix.get("t"), "reg": fix.get("r")})
-            watchers_out.append({"name": w["name"], "topic": w["topic"], "planes_topic": w["planes_topic"],
-                                 "priority": w["priority"],
-                                 "notify_landing": w["notify_landing"], "aircraft": aircraft, "following": []})
-        trips_out = []
+            watchers_out.append({"name": w["name"], "topic": w["topic"], "id": wid(w["topic"]),
+                                 "planes_topic": w["planes_topic"], "priority": w["priority"],
+                                 "time_zone": w["tz_set"], "notify_landing": w["notify_landing"],
+                                 "aircraft": aircraft})
+        trips_out, shared_out = [], []
         all_trips = trips.load()
-        by_topic = {w["topic"]: w for w in watchers_out}
         for t in all_trips:
             if t.get("topic") not in names:
                 continue
             for topic in t.get("shared_with") or []:
-                if topic in by_topic:
-                    by_topic[topic]["following"].append({
-                        "owner": names[t["topic"]], "flight": t["flight"], "date": t["date"],
-                        "dep_time": t.get("dep_time"), "dep_airport": t.get("dep_airport"),
+                if topic in mine:
+                    own = t.get("own") or {}
+                    inb = t.get("inbound") or {}
+                    shared_out.append({
+                        "id": f"{wid(t['topic'])}:{t['flight']}:{t['date']}", "to": wid(topic), "to_name": names.get(topic),
+                        "owner": names[t["topic"]], **{k: t.get(k) for k in (
+                            "flight", "date", "dep_time", "dep_airport", "arr_airport", "arr_time", "stops", "leg")},
                         "departed": bool((t.get("own_sent") or {}).get("departed")),
-                        "landed": bool((t.get("own_sent") or {}).get("landed"))})
+                        "landed": bool((t.get("own_sent") or {}).get("landed")),
+                        "status": own.get("status") if now - (own.get("last_seen") or 0) <= GAP_SECONDS else None,
+                        "where": where(own.get("last_fix"), own.get("last_seen")),
+                        "hex": own.get("hex") if now - (own.get("last_seen") or 0) <= GAP_SECONDS else None,
+                        "inbound": {k: inb.get(k) for k in ("tail", "flight", "origin", "arr_time")} if inb else None,
+                        "inbound_where": where(t.get("inbound_fix"), (t.get("inbound_fix") or {}).get("at")),
+                        "inbound_hex": (t.get("inbound_fix") or {}).get("hex")
+                        if where(t.get("inbound_fix"), (t.get("inbound_fix") or {}).get("at")) else None,
+                        "inbound_departed": bool(t.get("departed")), "inbound_landed": bool(t.get("landed")),
+                        "eta": t.get("eta_sent") if t.get("departed") and not t.get("landed") else None})
         for topic, name in names.items():
-            mine = trips.ordered([t for t in all_trips if t.get("topic") == topic])
-            for n, t in enumerate(mine, 1):
-                before, after = trips.connects_from(t, mine), trips.connects_to(t, mine)
+            if topic not in mine:
+                continue
+            mine_trips = trips.ordered([t for t in all_trips if t.get("topic") == topic])
+            for n, t in enumerate(mine_trips, 1):
+                before, after = trips.connects_from(t, mine_trips), trips.connects_to(t, mine_trips)
+                fix = t.get("inbound_fix") or {}
                 trips_out.append({**{k: t.get(k) for k in (
                     "flight", "date", "dep_time", "dep_airport", "arr_airport", "inbound", "source",
                     "departed", "landed", "eta_sent", "tight", "late", "missing", "replacement",
@@ -1020,30 +1121,51 @@ def run():
                     "connect_min": trips.connection_minutes(before, t) if before else None,
                     "connect_to": after["flight"] if after else None,
                     "topic": topic, "watcher": name, "number": n, "live": trips.is_live(t, now),
-                    "dep_tz": trips.airport_zone(t.get("dep_airport"), airports, cur["time_zone"]),
-                    "shared_with": [x for x in (t.get("shared_with") or []) if x in names],
+                    "dep_tz": trips.airport_zone(t.get("dep_airport"), airports, zone_of[topic]),
+                    "inbound_where": where(fix, fix.get("at")),
+                    "inbound_hex": fix.get("hex") if where(fix, fix.get("at")) else None,
+                    "shared_with": [wid(x) for x in (t.get("shared_with") or []) if x in names],
                     "shared_names": [names[x] for x in (t.get("shared_with") or []) if x in names],
                     "next_check": trips.next_check_time(t, now) if cur["adb_key"] else None})
         trips_out.sort(key=lambda t: t["dep_time"] or 0)
-        return {
-            "now": now, "version": VERSION, "time_zone": cur["time_zone"], "health": health.get(),
-            "settings": {"data_source": cur["data_source"], "poll_seconds": cur["poll_seconds"],
-                         "map_links": cur["map_links"], "text_commands": cur["text_commands"],
-                         "aerodatabox": bool(cur["adb_key"]), "ntfy": bool(resolve_ntfy(cur)[0]),
-                         "ntfy_server": cur["ntfy_server"], "phone_url": resolve_ntfy(cur)[2],
-                         "ntfy_custom_url": cur["ntfy_custom_url"], "ntfy_token_set": bool(cur["ntfy_token"]),
-                         "ntfy_phone_mode": cur["ntfy_phone_mode"], "local_ntfy": bool(os.environ.get("NTFY_URL")),
-                         "time_zone": cur["time_zone"], "web_password": cur["web_password"],
-                         "time_zones": [[k, v] for k, v in edits.TIME_ZONES.items()],
-                         "public_url": os.environ.get("TAILWATCHER_PUBLIC_URL", "").strip(),
-                         "platform": PLATFORM,
-                         "listening": sorted(names[k] for k in names if k not in listen_errors)},
-            "watchers": watchers_out, "trips": trips_out,
+        shared_out.sort(key=lambda t: t["dep_time"] or 0)
+        owner = {t: a for a in data["accounts"] for t in a.get("watchers") or []}
+        accounts_on = cur["web_auth"] == "accounts"
+        # Everyone on this server you could share a trip with: names only.
+        people = [{"id": wid(w["topic"]), "name": w["name"], "mine": w["topic"] in mine,
+                   "person": owner[w["topic"]]["name"] if accounts_on and w["topic"] in owner else None}
+                  for w in cur["watchers"]]
+        settings = {"poll_seconds": cur["poll_seconds"], "data_source": cur["data_source"],
+                    "text_commands": cur["text_commands"], "aerodatabox": bool(cur["adb_key"]),
+                    "ntfy": bool(resolve_ntfy(cur)[0]), "ntfy_server": cur["ntfy_server"],
+                    "phone_url": resolve_ntfy(cur)[2], "ntfy_phone_mode": cur["ntfy_phone_mode"],
+                    "time_zone": cur["time_zone"], "time_zones": [[k, v] for k, v in edits.TIME_ZONES.items()],
+                    "public_url": os.environ.get("TAILWATCHER_PUBLIC_URL", "").strip(), "platform": PLATFORM,
+                    "web_auth": cur["web_auth"], "ntfy_token_set": bool(cur["ntfy_token"]),
+                    "local_ntfy": bool(os.environ.get("NTFY_URL")),
+                    "listening": sorted(names[k] for k in names if k not in listen_errors and k in mine)}
+        if admin:
+            settings.update({"map_links": cur["map_links"], "ntfy_custom_url": cur["ntfy_custom_url"],
+                             "has_accounts": bool(data["accounts"])})
+        out = {
+            "now": now, "version": VERSION, "time_zone": own_zone if me else cur["time_zone"], "health": health.get(),
+            "me": {"mode": cur["web_auth"], "setup": cur["needs_setup"], "admin": bool(admin),
+                   "account": {k: me.get(k) for k in ("id", "username", "name", "role")} if me else None,
+                   "time_zone": own_zone if me else None},
+            "settings": settings, "watchers": watchers_out, "trips": trips_out, "shared": shared_out, "people": people,
             "invites": [{k: i.get(k) for k in ("token", "topic", "from", "expires", "kind")}
-                        for i in invites.active(now) if i.get("topic") in names],
+                        for i in invites.active(now) if i.get("topic") in mine],
             "history": [dict(e, watcher=names.get(home.get(e["topic"])) or e["topic"] or "Settings")
-                        for e in hist.recent(150)],
+                        for e in hist.recent(300)
+                        if not me or home.get(e["topic"]) in mine or (admin and not e["topic"])][:150],
         }
+        if admin and accounts_on:
+            out["accounts"] = [{**{k: a.get(k) for k in ("id", "username", "name", "role", "last_login")},
+                                "watchers": [{"id": wid(t), "name": names[t]} for t in a.get("watchers") or [] if t in names]}
+                               for a in data["accounts"]]
+            out["unassigned"] = [{"id": wid(w["topic"]), "name": w["name"]} for w in cur["watchers"]
+                                 if w["topic"] not in owner]
+        return out
 
     def trip_text(data, number=None, prefix=""):
         """Turn the Web UI's trip form into the text the "inbound"/"change"
@@ -1064,15 +1186,43 @@ def run():
             parts += ["to", val("to")]
         return " ".join(p for p in parts if p)
 
-    def ntfy_post(path, data):
+    def sign_in_change(data, viewer):
+        """Turning family accounts on needs someone to sign in as. Returns
+        (error, account to sign this browser in as, message to add)."""
+        cur = load_config()
+        want = data.get("webAuth")
+        if want not in AUTH_MODES or want == cur["web_auth"]:
+            return None, None, ""
+        if want == "accounts":
+            existing = accounts.load()
+            if accounts.admins(existing):
+                return None, None, " Family accounts are back on: sign in with your account."
+            admin = data.get("admin") or {}
+            try:
+                made = accounts.create(admin.get("username"), admin.get("name"), str(admin.get("password") or ""),
+                                       "admin", [w["topic"] for w in cur["watchers"]
+                                                 if accounts.owner_of(w["topic"], existing) is None])
+            except accounts.AccountError as e:
+                return str(e), None, ""
+            accounts.sync_recovery(web.read_password())  # remember today's Web UI password; a later reset unlocks this admin
+            return None, made["id"], f" Family accounts are on. You're the admin ({made['username']}): add people on the People page."
+        return None, None, ""
+
+    def ntfy_post(path, data, viewer=None):
         """Settings panel: save settings, set up this server's NTFY, make a person's login."""
         local = os.environ.get("NTFY_URL", "").strip()
         try:
             if path == "/api/settings":
-                msg = edits.save_settings(CONFIG_PATH, data)
+                if data.get("webAuth") is not None and data["webAuth"] not in AUTH_MODES:
+                    return 400, {"ok": False, "message": "Pick how people sign in."}
+                err, account, extra = sign_in_change(data, viewer)
+                if err:
+                    return 400, {"ok": False, "message": err}
+                msg = edits.save_settings(CONFIG_PATH, {k: v for k, v in data.items() if k != "admin"})
                 hist.add("in", "", "Settings changed on the web", kind="web", status="received")
                 wake.set()
-                return 200, {"ok": True, "message": msg}
+                login = {"account": account} if account else {} if data.get("webAuth") == "password" else None
+                return 200, {"ok": True, "message": msg + extra}, ({"login": login} if login is not None else {})
             if path == "/api/ntfy-setup":
                 phones = "login" if data.get("phones") == "login" else "open"
                 token, steps = ntfy_admin.setup(local, str(data.get("adminPassword") or ""), phones)
@@ -1111,13 +1261,13 @@ def run():
         if inv is None or w is None:
             return 404, invites.expired_page()
         return 200, invites.join_page(inv, w["name"], resolve_ntfy(cur)[2], cur["ntfy_server"],
-                                      cur["ntfy_phone_mode"], commands.zone(cur["time_zone"]))
+                                      cur["ntfy_phone_mode"], commands.zone(w["time_zone"]))
 
-    def invite_post(data):
+    def invite_post(data, mine):
         names = {w["topic"]: w["name"] for w in load_config()["watchers"]}
         if data.get("op") == "create":
             topic = str(data.get("topic") or "")
-            if topic not in names:
+            if topic not in names or topic not in mine:
                 return 404, {"ok": False, "message": "That watcher no longer exists."}
             try:
                 inv = invites.create(topic, str(data.get("from") or ""), int(data.get("days") or invites.DEFAULT_DAYS))
@@ -1127,36 +1277,211 @@ def run():
             return 200, {"ok": True, "message": f"Invite for {names[topic]} ready.", "path": f"join/{inv['token']}",
                          "expires": inv["expires"]}
         if data.get("op") == "revoke":
-            n = invites.revoke(str(data.get("token") or ""))
+            token = str(data.get("token") or "")
+            inv = next((i for i in invites.load() if i.get("token") == token), None)
+            if inv is not None and inv.get("topic") not in mine:
+                return 404, {"ok": False, "message": "That invite was already gone."}
+            n = invites.revoke(token)
             return 200, {"ok": True, "message": "Invite cancelled." if n else "That invite was already gone."}
         return 400, {"ok": False, "message": "Unknown action."}
 
-    def handle_post(path, data):
-        """Edits from the Web UI. Returns (http_status, {"ok", "message"})."""
+    def setup_post(data):
+        """First setup on a new install: how people sign in to the Web UI."""
+        cur = load_config()
+        if not cur["needs_setup"]:
+            return 409, {"ok": False, "message": "TailWatcher is already set up. Change sign-in in ⚙ Settings."}
+        want = data.get("webAuth")
+        if want not in AUTH_MODES:
+            return 400, {"ok": False, "message": "Pick how people sign in."}
+        account = None
+        if want == "accounts":
+            admin = data.get("admin") or {}
+            try:
+                account = accounts.create(admin.get("username"), admin.get("name"),
+                                          str(admin.get("password") or ""), "admin")["id"]
+            except accounts.AccountError as e:
+                return 400, {"ok": False, "message": str(e)}
+            accounts.sync_recovery(web.read_password())  # remember today's Web UI password; a later reset unlocks this admin
+        edits.save_settings(CONFIG_PATH, {"webAuth": want})
+        hist.add("in", "", f"Sign-in set to {want} at first setup", kind="web", status="received")
+        msg = {"off": "All set. Anyone who can reach this page can use it; turn on sign-in in ⚙ Settings any time.",
+               "password": "All set. This browser stays signed in; others need the Web UI password.",
+               "accounts": "All set. You're the admin: add a watcher for yourself, then add people on the People page."}[want]
+        login = {"account": account} if account else {} if want == "password" else None
+        return 200, {"ok": True, "message": msg}, ({"login": login} if login is not None else {})
+
+    def me_post(data, viewer):
+        """My account: name, time zone, password."""
+        me = viewer.get("account")
+        if not me:
+            return 400, {"ok": False, "message": "Family accounts are off."}
+        try:
+            if data.get("op") == "password":
+                if not accounts.authenticate(me["username"], str(data.get("current") or "")):
+                    return 400, {"ok": False, "message": "Your current password didn't match."}
+                accounts.update(me["id"], password=str(data.get("password") or ""))
+                return 200, {"ok": True, "message": "Password changed. Other devices were signed out."}, \
+                    {"login": {"account": me["id"]}}
+            if data.get("op") == "profile":
+                accounts.update(me["id"], name=str(data.get("name") or ""))
+                zone = data.get("timeZone")
+                if zone is not None:
+                    edits.set_time_zone(CONFIG_PATH, set(me.get("watchers") or []), str(zone))
+                wake.set()
+                return 200, {"ok": True, "message": "Saved."}
+        except (accounts.AccountError, edits.EditError) as e:
+            return 400, {"ok": False, "message": str(e)}
+        return 400, {"ok": False, "message": "Unknown action."}
+
+    def accounts_post(data, viewer):
+        """The People page (admins, family accounts on)."""
+        cur = load_config()
+        if cur["web_auth"] != "accounts":
+            return 400, {"ok": False, "message": "Family accounts are off."}
+        by_id = {wid(w["topic"]): w for w in cur["watchers"]}
+        op, account_id = data.get("op"), str(data.get("id") or "")
+        try:
+            if op == "add":
+                made = accounts.create(data.get("username"), data.get("name"), str(data.get("password") or ""),
+                                       "admin" if data.get("role") == "admin" else "member")
+                msg = f"Added {made['name']}. Give them their username and password; they can change it under My account."
+                if data.get("watcher"):
+                    result = {}
+                    edits.save_watcher(CONFIG_PATH, None, made["name"], "", result=result)
+                    accounts.assign(result["topic"], made["id"])
+                    msg += " Next: Connect phone on their watcher."
+                    wake.set()
+            elif op == "edit":
+                if account_id == viewer["account"]["id"] and data.get("role") not in (None, "admin"):
+                    return 400, {"ok": False, "message": "You can't remove your own admin role. Ask another admin."}
+                made = accounts.update(account_id, name=data.get("name"), role=data.get("role"))
+                msg = f"Saved {made['name']}."
+            elif op == "password":
+                made = accounts.update(account_id, password=str(data.get("password") or ""))
+                msg = f"New password set for {made['name']}; they were signed out everywhere."
+            elif op == "move":
+                w = by_id.get(str(data.get("watcher") or ""))
+                if w is None:
+                    return 404, {"ok": False, "message": "That watcher no longer exists."}
+                topic = w["topic"]
+                if data.get("newTopic"):
+                    result = {}
+                    edits.save_watcher(CONFIG_PATH, topic, w["name"], "", w["priority"], w["notify_landing"],
+                                       new_topic_requested=True, result=result)
+                    accounts.rename_topic(topic, result["topic"])
+                    topic = result["topic"]
+                accounts.assign(topic, account_id or None)
+                who = accounts.find(account_id)
+                msg = f"Moved {w['name']} to {who['name'] if who else 'nobody (admins see it)'}." + (
+                    " It has a new topic: reconnect its phone." if data.get("newTopic") else "")
+                wake.set()
+            elif op == "delete":
+                if account_id == viewer["account"]["id"]:
+                    return 400, {"ok": False, "message": "You can't delete your own account."}
+                topics = accounts.delete(account_id)
+                to = str(data.get("moveTo") or "")
+                for topic in topics:
+                    if to:
+                        accounts.assign(topic, to)
+                    else:
+                        edits.remove_watcher(CONFIG_PATH, topic)
+                        accounts.drop_topic(topic)
+                msg = "Deleted the account" + (" and moved its watchers." if to else " and its watchers.")
+                wake.set()
+            else:
+                return 400, {"ok": False, "message": "Unknown action."}
+        except (accounts.AccountError, edits.EditError) as e:
+            return 400, {"ok": False, "message": str(e)}
+        hist.add("in", "", msg.split(".")[0] + ".", kind="web", status="received")
+        return 200, {"ok": True, "message": msg}
+
+    def unfollow_post(data, mine):
+        """Stop following a trip someone shared with you (and the rest of its journey)."""
+        names = {w["topic"]: w["name"] for w in load_config()["watchers"]}
+        owner_id, _, rest = str(data.get("id") or "").partition(":")
+        flight, _, date = rest.partition(":")
+        dropped, owner = [], None
+        with trips.TRIPS_LOCK:
+            all_trips = trips.load()
+            hit = next((t for t in all_trips if wid(t.get("topic") or "") == owner_id
+                        and t["flight"] == flight and t["date"] == date), None)
+            if hit is None:
+                return 404, {"ok": False, "message": "That trip is no longer shared with you."}
+            owner = hit["topic"]
+            for t in trips.journey(hit, all_trips):
+                gone = [x for x in t.get("shared_with") or [] if x in mine]
+                if gone:
+                    t["shared_with"] = [x for x in t["shared_with"] if x not in mine]
+                    dropped.extend(gone)
+            if dropped:
+                trips.save(all_trips)
+        if not dropped:
+            return 404, {"ok": False, "message": "That trip is no longer shared with you."}
+        who = ", ".join(sorted({names.get(t, "") for t in dropped}))
+        send({"topic": owner, "message": f"🔕 {who} stopped following your {flight} trip.", "tags": ["robot"],
+              "priority": 2})
+        hist.add("in", dropped[0], f"Stopped following {names.get(owner)}'s {flight}", kind="web", status="received")
+        return 200, {"ok": True, "message": f"You'll no longer get alerts for {names.get(owner)}'s {flight}."}
+
+    ADMIN_ONLY = ("/api/settings", "/api/ntfy-setup", "/api/ntfy-login", "/api/accounts")
+
+    def handle_post(path, data, viewer=None):
+        """Edits from the Web UI. Returns (http_status, {"ok", "message"}[, {"login": …}])."""
+        viewer = viewer or {"mode": "off", "admin": True, "account": None, "token": None}
+        cur = load_config()
+        mine = scope(viewer, cur)
+        if path == "/api/setup":
+            return setup_post(data)
+        if path in ADMIN_ONLY and not viewer["admin"]:
+            return 403, {"ok": False, "message": "Only an admin can change that."}
         if path in ("/api/settings", "/api/ntfy-setup", "/api/ntfy-login"):
-            return ntfy_post(path, data)
+            return ntfy_post(path, data, viewer)
+        if path == "/api/accounts":
+            return accounts_post(data, viewer)
+        if path == "/api/me":
+            return me_post(data, viewer)
+        if path == "/api/unfollow":
+            return unfollow_post(data, mine)
         if path == "/api/invite":
-            return invite_post(data)
+            return invite_post(data, mine)
         if path == "/api/import":  # read only: it pre-fills the Add trip form, nothing is saved
+            me = viewer.get("account")
+            zone = next((w["time_zone"] for w in cur["watchers"] if me and w["topic"] in mine), cur["time_zone"])
             found = itinerary.preview(str(data.get("text") or ""), str(data.get("name") or ""),
-                                      time.time(), load_config()["time_zone"], airports)
+                                      time.time(), zone, airports)
             return (200 if found["ok"] else 400), found
         topic = str(data.get("topic") or "")
         op = data.get("op")
-        names = {w["topic"]: w["name"] for w in load_config()["watchers"]}  # fresh: see snapshot()
+        names = {w["topic"]: w["name"] for w in cur["watchers"]}  # fresh: see snapshot()
+        gone = (404, {"ok": False, "message": "That watcher no longer exists."})
         try:
             if path == "/api/watcher":
                 if op == "save":
-                    msg = edits.save_watcher(CONFIG_PATH, data.get("original") or None, data.get("name"),
+                    original = data.get("original") or None
+                    if original and original not in mine:
+                        return gone
+                    result = {}
+                    msg = edits.save_watcher(CONFIG_PATH, original, data.get("name"),
                                              data.get("topic"), data.get("priority") or "default",
                                              bool(data.get("notifyLanding")),
                                              new_topic_requested=bool(data.get("newTopic")),
-                                             planes=data.get("planes"))
+                                             planes=data.get("planes"), time_zone=data.get("timeZone"),
+                                             result=result)
+                    topic = result["topic"]
+                    if original and original != topic:
+                        accounts.rename_topic(original, topic)
+                    elif not original and viewer.get("account"):
+                        accounts.assign(topic, viewer["account"]["id"])
                 elif op == "remove":
+                    if topic not in mine:
+                        return gone
                     msg = edits.remove_watcher(CONFIG_PATH, topic)
+                    accounts.drop_topic(topic)
                 else:
                     return 400, {"ok": False, "message": "Unknown action."}
             elif path == "/api/aircraft":
+                if topic not in mine:
+                    return gone
                 if op == "save":
                     msg = edits.save_aircraft(CONFIG_PATH, topic, data.get("ident"), data.get("label"),
                                               data.get("expiresDays"), data.get("original"))
@@ -1165,12 +1490,15 @@ def run():
                 else:
                     return 400, {"ok": False, "message": "Unknown action."}
             elif path == "/api/trip":
-                if topic not in names:
-                    return 404, {"ok": False, "message": "That watcher no longer exists."}
+                if topic not in names or topic not in mine:
+                    return gone
                 now = time.time()
                 share = data.get("share")
                 if share is not None and not isinstance(share, list):
                     return 400, {"ok": False, "message": "Bad request."}
+                if share is not None:  # the form sends watcher ids, never topics
+                    ids = {wid(t): t for t in names}
+                    share = [ids[str(x)] for x in share if str(x) in ids]
                 has_return = bool(str(data.get("ret_flight") or "").strip())
                 has = lambda prefix: bool(str(data.get(prefix + "flight") or "").strip())  # noqa: E731
                 conns = lambda base: [p for p in (trips.form_prefix(base, n) for n in range(trips.MAX_LEGS - 1))  # noqa: E731
@@ -1189,7 +1517,7 @@ def run():
                         nums = [i for i, t in enumerate(mine, 1) if flight and t["flight"] == flight[0]
                                 and (not data.get("date") or t["date"] == data["date"])]
                         if nums:
-                            msg += "\n" + set_share(topic, str(nums[-1]), [str(x) for x in share])
+                            msg += "\n" + set_share(topic, str(nums[-1]), share)
                 elif op == "change":
                     number = int(data.get("number") or 0)
                     msg = ""
@@ -1217,16 +1545,16 @@ def run():
                             after = next(i for i, x in enumerate(mine, 1) if x is nxt) if nxt else after
                     edits_text = trip_text(data, number)
                     if edits_text != str(number):
-                        changed = trips.modify(topic, edits_text, on_change, now, cfg["time_zone"])
+                        changed = trips.modify(topic, edits_text, on_change, now, tz(topic))
                         if msg and changed.startswith(("❌", "🤔", "🤷", "Which trip", "You have ")):
                             return 400, {"ok": False, "message": f"{changed}\n(The new flight was added.)"}
                         msg = f"{msg}\n{changed}".strip()
                     if share is not None and not msg.startswith(("🤔", "🤷", "❌")):
-                        shared = set_share(topic, str(number), [str(x) for x in share])
+                        shared = set_share(topic, str(number), share)
                         msg = f"{msg}\n{shared}".strip() if msg else shared
                 elif op == "cancel":
                     selector = f"{int(data.get('number') or 0)}{' only' if data.get('only') else ''}"
-                    msg = trips.modify_legs(topic, selector, on_cancel, now, cfg["time_zone"])
+                    msg = trips.modify_legs(topic, selector, on_cancel, now, tz(topic))
                 else:
                     return 400, {"ok": False, "message": "Unknown action."}
             else:
@@ -1238,16 +1566,13 @@ def run():
         failed = (msg.startswith(("❌", "🤔", "🤷", "Which trip", "Tell me your flight", "You have "))
                   and not msg.startswith("🤷 AeroDataBox has nothing"))  # that one still saves the trip
         if not failed:
-            if path == "/api/watcher" and not topic:  # a new watcher's topic was just generated
-                topic = next((w["topic"] for w in load_config()["watchers"]
-                              if w["name"] == str(data.get("name") or "").strip()), "")
             hist.add("in", topic or data.get("topic") or "", msg.splitlines()[0], kind="web", status="received")
             wake.set()
         log.info("web edit %s %s → %s", path, op, msg.splitlines()[0])
         return (400 if failed else 200), {"ok": not failed, "message": msg}
 
-    web.serve(HEALTH_PORT, health, snapshot, require_password=web_password_required, post=handle_post,
-              public=public_page)
+    web.serve(HEALTH_PORT, health, snapshot, mode=web_auth, post=handle_post, public=public_page,
+              before_login=prepare_accounts)
 
     backoff, error_streak = 0, 0
     while True:
@@ -1265,6 +1590,10 @@ def run():
                 send({"topic": where, "message": f"⌛ Stopped watching {ident} (expired)",
                       "tags": ["robot"], "priority": 2})
 
+        try:
+            prepare_accounts()
+        except (OSError, ValueError) as e:
+            log.error("accounts: %s", e)
         mtime = config_mtime()
         if mtime != cfg_mtime:
             # Configure (StartOS) or a text command changed the file: apply it
@@ -1364,6 +1693,24 @@ def run():
             wake.wait(wait)
         wake.clear()
 
+def prepare_accounts():
+    """With family accounts on, make sure someone can sign in (turned on in
+    StartOS Configure with nobody to sign in as: "admin" with the Web UI
+    password), and apply a Web UI password reset from StartOS Actions or the
+    CLI to the first admin. Runs before each sign-in and each poll cycle."""
+    cfg = load_config()
+    if cfg["web_auth"] != "accounts":
+        return
+    password = web.read_password()
+    made = accounts.ensure_admin(password, [w["topic"] for w in cfg["watchers"]])
+    if made:
+        log.info("Family accounts are on with nobody to sign in as: sign in as %r with the Web UI password.",
+                 made["username"])
+    who = accounts.sync_recovery(password)
+    if who:
+        log.info("The Web UI password was reset: it's now %s's password.", who)
+
+
 def send_test(cfg):
     """A sample takeoff alert to every watcher's topic, like StartOS's
     "Send Test Notification" action. Returns [(watcher name, topic, result)]."""
@@ -1390,12 +1737,36 @@ def send_test(cfg):
 
 
 def cli(args):
-    """`python /app/tailwatcher.py password|reset-password|test`, for installs
-    without StartOS's Actions menu (docker exec tailwatcher ...)."""
+    """`python /app/tailwatcher.py password|reset-password [USERNAME]|accounts|test`,
+    for installs without StartOS's Actions menu (docker exec tailwatcher ...)."""
     if args == ["password"]:
         print(web.read_password() or "No password yet: start TailWatcher once to make one.")
     elif args == ["reset-password"]:
-        print(web.new_password(), "(the old password stopped working; any username)")
+        password = web.new_password()
+        if web_auth() == "accounts":
+            prepare_accounts()  # the first admin takes the new password
+            first = (accounts.admins(accounts.load()) or [{}])[0].get("username")
+            print(password, f"(the new password for the first admin, {first})" if first else "")
+        else:
+            print(password, "(the old password stopped working)")
+    elif len(args) == 2 and args[0] == "reset-password":
+        data = accounts.load()
+        a = next((x for x in data["accounts"] if x["username"] == args[1].lower()), None)
+        if a is None:
+            print(f"No account called {args[1]}. Run: tailwatcher.py accounts")
+            return 1
+        password = "".join(web.secrets.choice(web.PASSWORD_CHARS) for _ in range(16))
+        accounts.update(a["id"], password=password)
+        print(password, f"(the new password for {a['username']}; they were signed out everywhere)")
+    elif args == ["accounts"]:
+        cfg, data = load_config(), accounts.load()
+        names = {w["topic"]: w["name"] for w in cfg["watchers"]}
+        print(f"Sign-in: {cfg['web_auth']}")
+        for a in data["accounts"]:
+            owned = ", ".join(names.get(t, t) for t in a.get("watchers") or []) or "no watchers"
+            print(f"{a['username']} ({a['role']}): {a['name']} · {owned}")
+        if not data["accounts"]:
+            print("No family accounts yet.")
     elif args == ["test"]:
         cfg = load_config()
         if not cfg["watchers"]:
@@ -1406,7 +1777,7 @@ def cli(args):
             print(f"{name} → {topic}: {result}")
         return 1 if any(not r.startswith("✓") for _, _, r in results) else 0
     else:
-        print("Usage: tailwatcher.py [password | reset-password | test]")
+        print("Usage: tailwatcher.py [password | reset-password [USERNAME] | accounts | test]")
         return 2
     return 0
 
