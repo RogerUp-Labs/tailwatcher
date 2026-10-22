@@ -197,6 +197,7 @@ section h2 .count { background: var(--surface); border: 1px solid var(--border);
 .ev-msg.open { -webkit-line-clamp: unset; }
 .ev.in .ev-msg { font-family: var(--mono); color: var(--text); }
 .ev .chip { margin-top: 4px; }
+.feed-more { display: flex; gap: 8px; justify-content: center; align-items: center; padding: 10px 14px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
 
 /* ---------- system ---------- */
 .sys { padding: 4px 0; }
@@ -665,8 +666,12 @@ function renderFeed(d) {
     $("feed").innerHTML = `<div class="empty">Nothing yet. Alerts, replies and your text commands will show up here.</div>`;
     return;
   }
+  // On phones the feed isn't a scroll box, so 300 entries would bury the rest
+  // of the page: show the newest few and grow on request.
+  const narrow = NARROW.matches, total = d.history.length;
+  const shown = narrow ? Math.min(FEED_SHOWN, total) : total;
   let html = "", lastDay = "";
-  for (const e of d.history) {
+  for (const e of d.history.slice(0, shown)) {
     const day = dayKey(e.t);
     if (day !== lastDay) { html += `<div class="day">${fmtDay(e.t)}</div>`; lastDay = day; }
     const chip = e.status === "retrying" ? `<span class="chip warn">retrying</span>` : e.status === "refused" ? `<span class="chip bad">refused by NTFY</span>` : "";
@@ -680,8 +685,25 @@ function renderFeed(d) {
       </div>
     </div>`;
   }
+  if (narrow && (shown < total || FEED_SHOWN > FEED_STEP)) {
+    html += `<div class="feed-more">
+      ${shown < total ? `<button type="button" class="btn" data-feed="more">Show more</button>` : ""}
+      ${FEED_SHOWN > FEED_STEP ? `<button type="button" class="btn" data-feed="less">Show less</button>` : ""}
+      <span>${shown} of ${total}</span></div>`;
+  }
   $("feed").innerHTML = html;
 }
+const NARROW = matchMedia("(max-width: 900px)");
+const FEED_STEP = 8;
+let FEED_SHOWN = FEED_STEP;
+$("feed").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-feed]");
+  if (!b || !LAST) return;
+  if (b.dataset.feed === "more") FEED_SHOWN += 20;
+  else { FEED_SHOWN = FEED_STEP; $("h-act").scrollIntoView({block: "start"}); }
+  renderFeed(LAST);
+});
+NARROW.addEventListener("change", () => { if (LAST) renderFeed(LAST); });
 
 function renderSystem(d) {
   const s = d.settings, h = d.health;
