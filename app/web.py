@@ -11,8 +11,9 @@ Three sign-in modes (config.json "webAuth", passed in as `mode`):
             username and sees only their own watchers and trips.
 Both login modes use the /login form and a session cookie (no JavaScript
 needed, so it works over Tor); password mode also still takes HTTP Basic
-auth for scripts. /health (the StartOS ready check), /login and invite pages
-(/join/...) stay open.
+auth for scripts. /health (the StartOS ready check), /login, the "Forgot
+password?" pages (/login?forgot, /forgot, /reset) and invite and sign-up
+pages (/join/...) stay open.
 
 Edits are JSON POSTs to /api/... carrying an "X-TailWatcher: 1" header, and
 an Origin, if sent, must match the Host. Browsers won't let another website
@@ -109,21 +110,48 @@ input { font:inherit; font-size:16px; padding:11px 12px; border-radius:10px; bor
 input:focus { outline:2px solid var(--brand); outline-offset:0; }
 button.btn.primary { background:var(--brand); border-color:var(--brand); color:var(--on-brand); font-weight:600; font-size:17px; padding:13px; }
 .error { color:#c2312b; font-size:14px; margin:0; }
+main a { color:var(--brand); }
 @media (prefers-color-scheme: dark) { .error { color:#ff6b63; } }
 """
 
 
+def form_page(title, sub, form, action, error="", after="", base=""):
+    """A small page with one form (plain HTML, works with JavaScript off).
+    `base` leads back to the root for pages under /join/."""
+    e = html.escape
+    body = f"""<h1>{e(title)}</h1><p class="sub">{sub}</p>
+<form method="post" action="{e(action)}">
+{f'<p class="error" role="alert">{e(error)}</p>' if error else ''}
+{form}
+</form>
+{after}"""
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark"><title>{e(title)} · TailWatcher</title>
+<link rel="icon" href="{base}icon.svg"><style>{LOGIN_STYLE}</style></head><body>
+<header><img src="{base}icon.svg" alt="">TailWatcher</header><main>{body}</main></body></html>"""
+
+
+def _field(label, name, value="", kind="text", auto="", extra=""):
+    e = html.escape
+    auto = f' autocomplete="{auto}"' if auto else ""
+    return f'<label>{e(label)}<input type="{kind}" name="{name}" value="{e(value)}"{auto} {extra}></label>'
+
+
+USERNAME_ATTRS = 'autocapitalize="none" spellcheck="false" required maxlength="32"'
+
+
 def login_page(mode, error="", username=""):
-    """The sign-in form (plain HTML, works with JavaScript off)."""
     e = html.escape
     if mode == "accounts":
-        title, sub = "Sign in to TailWatcher", "Use the username and password you were given."
-        user = (f'<label for="u">Username<input id="u" name="username" value="{e(username)}" autocomplete="username" '
-                'autocapitalize="none" spellcheck="false" required autofocus></label>')
+        title, sub = "Sign in to TailWatcher", "Use your username and password."
+        user = _field("Username", "username", username, auto="username", extra=USERNAME_ATTRS + " autofocus")
         reset = ("StartOS → TailWatcher → Actions → Reset Web UI Password makes a new password for the first admin"
                  if PLATFORM == "startos" else
                  "docker exec tailwatcher python /app/tailwatcher.py reset-password USERNAME gives that account a new password")
-        help_ = ("<p class='small'>Forgot your password? Ask an admin to reset it on the People page. "
+        help_ = ("<p class='small'><a href='login?forgot=1'>Forgot your password?</a> TailWatcher sends a code "
+                 "to your alerts in the ntfy app. No alerts set up yet? Ask an admin to reset it on the People page. "
                  f"Locked-out admin: {e(reset)}.</p>")
     else:
         title, sub = "TailWatcher", "This dashboard is password protected."
@@ -131,30 +159,62 @@ def login_page(mode, error="", username=""):
         where = ("StartOS → TailWatcher → Actions → Show Web UI Password" if PLATFORM == "startos" else
                  "TailWatcher's container log, or: docker exec tailwatcher python /app/tailwatcher.py password")
         help_ = f"<p class='small'>The password is in {e(where)}.</p>"
-    body = f"""<h1>{e(title)}</h1><p class="sub">{e(sub)}</p>
-<form method="post" action="login">
-{f'<p class="error" role="alert">{e(error)}</p>' if error else ''}
-{user}
-<label for="p">Password<input id="p" type="password" name="password" autocomplete="current-password" required{'' if mode == 'accounts' else ' autofocus'}></label>
-<button class="btn primary" type="submit">Sign in</button>
-</form>
-{help_}"""
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer">
-<meta name="color-scheme" content="light dark"><title>Sign in · TailWatcher</title>
-<link rel="icon" href="icon.svg"><style>{LOGIN_STYLE}</style></head><body>
-<header><img src="icon.svg" alt="">TailWatcher</header><main>{body}</main></body></html>"""
+    form = (user + _field("Password", "password", kind="password", auto="current-password",
+                          extra="required" + ("" if mode == "accounts" else " autofocus"))
+            + '<button class="btn primary" type="submit">Sign in</button>')
+    return form_page(title, e(sub), form, "login", error, help_)
+
+
+def forgot_page(error="", username=""):
+    form = (_field("Username", "username", username, auto="username", extra=USERNAME_ATTRS + " autofocus")
+            + '<button class="btn primary" type="submit">Send me a code</button>')
+    return form_page("Forgot your password?", "TailWatcher sends a 6-digit code to your alerts in the ntfy app. "
+                     "Type it on the next page to pick a new password.", form, "forgot", error,
+                     "<p class='small'><a href='login'>Back to sign in</a></p>")
+
+
+def reset_page(username, error=""):
+    e = html.escape
+    form = (f'<input type="hidden" name="username" value="{e(username)}">'
+            + _field("Code", "code", auto="one-time-code",
+                     extra='inputmode="numeric" pattern="[0-9 ]*" maxlength="7" required autofocus')
+            + _field("New password", "password", kind="password", auto="new-password", extra='required minlength="8"')
+            + _field("New password again", "confirm", kind="password", auto="new-password", extra='required minlength="8"')
+            + '<button class="btn primary" type="submit">Set new password</button>')
+    return form_page("Check your phone", f"If <b>{e(username)}</b> has alerts set up, a code is on its way in the "
+                     f"ntfy app. It works for {accounts.RESET_MINUTES} minutes.", form, "reset", error,
+                     "<p class='small'>Nothing came? <a href='login?forgot=1'>Send a new code</a> (one a minute), "
+                     "or ask an admin to reset your password on the People page.</p>")
+
+
+def signup_page(invite, error="", name="", username=""):
+    """The sign-up link page at /join/<token> (family accounts)."""
+    e = html.escape
+    sender = invite.get("from") or ""
+    title = f"{sender} invited you to TailWatcher" if sender else "Make your TailWatcher account"
+    sub = ("Pick a name, username and password. You'll see your own trips and flight alerts"
+           + (", with alerts sent to your phone" if invite.get("watcher") else "")
+           + ", and trips people share with you.")
+    form = (_field("Your name", "name", name, auto="name", extra='required maxlength="40" autofocus')
+            + _field("Username", "username", username, auto="username", extra=USERNAME_ATTRS)
+            + "<p class='small' style='margin:-8px 0 0'>Lowercase letters, numbers, dots or dashes. You type it to sign in.</p>"
+            + _field("Password", "password", kind="password", auto="new-password", extra='required minlength="8"')
+            + _field("Password again", "confirm", kind="password", auto="new-password", extra='required minlength="8"')
+            + '<button class="btn primary" type="submit">Make my account</button>')
+    return form_page(title, e(sub), form, invite["token"], error,
+                     "<p class='small'>This link works once. Keep it to yourself.</p>", base="../")
 
 
 def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
                  mode=lambda: "off", post=None, public=None, before_login=None,
-                 accounts_path=None, sessions_path=None):
+                 accounts_path=None, sessions_path=None, signup=None, forgot=None):
     """mode() gives the sign-in mode for each request: "off", "password" or
     "accounts". snapshot(viewer) and post(path, data, viewer) get the signed-in
     viewer: {"mode", "admin", "account" (None unless accounts), "token"}.
     post may return (code, body, {"login": {"account": id}}) to sign this
-    browser in (after first setup or turning accounts on)."""
+    browser in (after first setup or turning accounts on).
+    signup(token, form) handles a sign-up link's form: (code, page, account_id
+    or None). forgot(username) sends a reset code to that person's topics."""
     class Handler(BaseHTTPRequestHandler):
         def reply(self, code, body, ctype="application/json", extra=None):
             if isinstance(body, (dict, list)):
@@ -230,23 +290,35 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
                 return None
             return self.rfile.read(length)
 
+        def form(self):
+            """A posted form, or None (after a 403) if it came from another site.
+            Our pages are sent with Referrer-Policy: no-referrer, so browsers
+            post them with "Origin: null"."""
+            origin = self.headers.get("Origin")
+            if origin != "null" and not same_origin(origin, self.headers.get("Host")):
+                self.reply(403, "Sign in from the TailWatcher page.", "text/plain; charset=utf-8")
+                return None
+            raw = self.body(4096)
+            form = urllib.parse.parse_qs((raw or b"").decode("utf-8", "replace"))
+            return {k: v[0] for k, v in form.items()}
+
+        def page(self, code, page, extra=None):
+            return self.reply(code, page, "text/html; charset=utf-8",
+                              {"X-Robots-Tag": "noindex, nofollow", **(extra or {})})
+
         def login(self):
             m = mode()
             if m == "off":
                 return self.reply(303, "", "text/plain", {"Location": "./"})
-            # The form page is sent with Referrer-Policy: no-referrer, so browsers post it with "Origin: null".
-            origin = self.headers.get("Origin")
-            if origin != "null" and not same_origin(origin, self.headers.get("Host")):
-                return self.reply(403, "Sign in from the TailWatcher page.", "text/plain; charset=utf-8")
-            raw = self.body(4096)
-            form = urllib.parse.parse_qs((raw or b"").decode("utf-8", "replace"))
-            username = (form.get("username") or [""])[0].strip().lower()[:64]
-            password = (form.get("password") or [""])[0]
+            form = self.form()
+            if form is None:
+                return
+            username = form.get("username", "").strip().lower()[:64]
+            password = form.get("password", "")
             keys = ["ip:" + self.client_address[0]] + (["user:" + username] if username else [])
             wait = THROTTLE.blocked(keys)
             if wait:
-                return self.reply(429, login_page(m, f"Too many tries. Wait {wait} seconds and try again.", username),
-                                  "text/html; charset=utf-8")
+                return self.page(429, login_page(m, f"Too many tries. Wait {wait} seconds and try again.", username))
             if m == "password":
                 stored = read_password(password_path)
                 ok = bool(stored) and hmac.compare_digest(password.encode(), stored.encode())
@@ -258,16 +330,80 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
                 token = accounts.new_session(a["id"], None, sessions_path) if a else None
             if not token:
                 THROTTLE.failed(keys)
-                return self.reply(401, login_page(m, "That didn't match. Check the "
-                                                  + ("username and password." if m == "accounts" else "password."),
-                                                  username), "text/html; charset=utf-8")
+                return self.page(401, login_page(m, "That didn't match. Check the "
+                                                 + ("username and password." if m == "accounts" else "password."),
+                                                 username))
             THROTTLE.passed(keys)
             return self.reply(303, "", "text/plain", {"Location": "./", **self.cookie(token)})
+
+        def forgot(self):
+            """Forgot password, step 1: send a code. The reply never says
+            whether the username exists."""
+            if mode() != "accounts":
+                return self.reply(303, "", "text/plain", {"Location": "login"})
+            form = self.form()
+            if form is None:
+                return
+            username = form.get("username", "").strip().lower()[:64]
+            wait = THROTTLE.blocked(["ip:" + self.client_address[0]])
+            if wait:
+                return self.page(429, forgot_page(f"Too many tries. Wait {wait} seconds and try again.", username))
+            if not username:
+                return self.page(400, forgot_page("Type your username."))
+            if forgot:
+                forgot(username)
+            return self.page(200, reset_page(username))
+
+        def reset(self):
+            """Forgot password, step 2: the code and a new password."""
+            if mode() != "accounts":
+                return self.reply(303, "", "text/plain", {"Location": "login"})
+            form = self.form()
+            if form is None:
+                return
+            username = form.get("username", "").strip().lower()[:64]
+            keys = ["ip:" + self.client_address[0], "user:" + username]
+            wait = THROTTLE.blocked(keys)
+            if wait:
+                return self.page(429, reset_page(username, f"Too many tries. Wait {wait} seconds and try again."))
+            if form.get("password", "") != form.get("confirm", ""):
+                return self.page(400, reset_page(username, "The two passwords don't match."))
+            try:
+                a = accounts.finish_reset(username, form.get("code", ""), form.get("password", ""), accounts_path)
+            except accounts.AccountError as e:
+                THROTTLE.failed(keys)
+                return self.page(400, reset_page(username, str(e)))
+            THROTTLE.passed(keys)
+            token = accounts.new_session(a["id"], None, sessions_path)
+            return self.reply(303, "", "text/plain", {"Location": "./", **self.cookie(token)})
+
+        def join(self, token):
+            """A sign-up link's form."""
+            form = self.form()
+            if form is None:
+                return
+            keys = ["ip:" + self.client_address[0]]
+            wait = THROTTLE.blocked(keys)
+            if wait:
+                return self.page(429, f"Too many tries. Wait {wait} seconds, then go back and try again.")
+            code, page, account_id = signup(token, form)
+            if not account_id:
+                if code == 404:
+                    THROTTLE.failed(keys)  # someone guessing links
+                return self.page(code, page)
+            token = accounts.new_session(account_id, None, sessions_path)
+            return self.reply(303, "", "text/plain", {"Location": "../#welcome", **self.cookie(token)})
 
         def do_POST(self):
             path = urllib.parse.urlparse(self.path).path
             if path == "/login":
                 return self.login()
+            if path == "/forgot":
+                return self.forgot()
+            if path == "/reset":
+                return self.reset()
+            if path.startswith("/join/") and signup is not None:
+                return self.join(path[len("/join/"):])
             v = self.gate()
             if v is None:
                 return
@@ -319,8 +455,9 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
                 m = mode()
                 if m == "off" or self.viewer(m) not in (None, "nopw"):
                     return self.reply(303, "", "text/plain", {"Location": "./"})
-                return self.reply(200, login_page(m), "text/html; charset=utf-8",
-                                  {"X-Robots-Tag": "noindex, nofollow"})
+                if m == "accounts" and "forgot" in urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query):
+                    return self.page(200, forgot_page())
+                return self.page(200, login_page(m))
             v = self.gate(page=path in ("/", "/index.html"))
             if v is None:
                 return
@@ -345,9 +482,10 @@ def make_handler(health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR,
 
 
 def serve(port, health, snapshot, password_path=PASSWORD_PATH, web_dir=WEB_DIR, mode=lambda: "off",
-          post=None, public=None, before_login=None, accounts_path=None, sessions_path=None):
+          post=None, public=None, before_login=None, accounts_path=None, sessions_path=None,
+          signup=None, forgot=None):
     srv = ThreadingHTTPServer(("0.0.0.0", port),
                               make_handler(health, snapshot, password_path, web_dir, mode, post, public,
-                                           before_login, accounts_path, sessions_path))
+                                           before_login, accounts_path, sessions_path, signup, forgot))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv

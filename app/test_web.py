@@ -28,11 +28,18 @@ class WebServerTest(unittest.TestCase):
         with open(os.path.join(cls.dir, "index.html"), "w") as f:
             f.write("<title>TailWatcher</title>")
         cls.mode = "off"
-        cls.seen = []
+        cls.seen, cls.codes, cls.signups = [], [], []
+
+        def signup(token, form):
+            cls.signups.append((token, form))
+            if token != "good-token-0123456789abc":
+                return 404, "expired", None
+            return 303, "", accounts.create(form["username"], form["name"], form["password"], path=cls.acc)["id"]
         cls.srv = web.serve(0, Health(), lambda v: cls.seen.append(v) or {"watchers": [], "secret": False},
                             password_path=cls.pw, web_dir=cls.dir, mode=lambda: cls.mode,
                             post=lambda path, data, v: (200, {"ok": True, "who": (v["account"] or {}).get("username")}),
-                            accounts_path=cls.acc, sessions_path=cls.ses)
+                            accounts_path=cls.acc, sessions_path=cls.ses, signup=signup,
+                            forgot=lambda u: cls.codes.append(accounts.start_reset(u, cls.acc)[1]))
         cls.port = cls.srv.server_address[1]
 
     @classmethod
@@ -61,10 +68,21 @@ class WebServerTest(unittest.TestCase):
         return self.request("GET", path, headers=headers)
 
     def login(self, password, username=""):
-        body = urllib.parse.urlencode({"username": username, "password": password})
-        code, page, headers = self.request("POST", "/login", body, {"Content-Type": "application/x-www-form-urlencoded"})
+        return self.form("/login", username=username, password=password)
+
+    def form(self, path, **fields):
+        """POST a form like the browser does: (status, page, cookie)."""
+        code, page, headers = self.request("POST", path, urllib.parse.urlencode(fields),
+                                           {"Content-Type": "application/x-www-form-urlencoded", "Origin": "null"})
         cookie = (headers.get("Set-Cookie") or "").split(";")[0]
         return code, page, cookie
+
+    def fresh_accounts(self):
+        type(self).mode = "accounts"
+        for p in (self.acc, self.ses):
+            if os.path.exists(p):
+                os.unlink(p)
+        accounts._resets.clear()
 
     def set_password(self, pw):
         with open(self.pw, "w") as f:
@@ -137,10 +155,7 @@ class WebServerTest(unittest.TestCase):
         self.assertIn("Too many tries", page)
 
     def test_family_accounts(self):
-        type(self).mode = "accounts"
-        for p in (self.acc, self.ses):
-            if os.path.exists(p):
-                os.unlink(p)
+        self.fresh_accounts()
         accounts.create("mom", "Mom", "mom-password", "admin", ["tw-mom"], self.acc)
         accounts.create("kid", "Kid", "kid-password", "member", ["tw-kid"], self.acc)
         self.assertIn('name="username"', self.get("/login")[1])
@@ -166,6 +181,64 @@ class WebServerTest(unittest.TestCase):
         # (update() signs out the default sessions file; the server here uses its own)
         accounts.end_for(self.seen[-1]["account"]["id"], self.ses)
         self.assertEqual(self.get("/api/state", cookie=cookie)[0], 401)
+
+    def test_forgot_password(self):
+        self.fresh_accounts()
+        accounts.create("kid", "Kid", "kid-password", "member", ["tw-kid"], self.acc)
+        self.assertIn("login?forgot=1", self.get("/login")[1])
+        self.assertIn('action="forgot"', self.get("/login?forgot=1")[1])
+        code, page, _ = self.form("/forgot", username="Kid")
+        self.assertEqual(code, 200)
+        self.assertIn('action="reset"', page)
+        code_sent = self.codes[-1]
+        self.assertRegex(code_sent, r"^\d{6}$")
+        page_for_nobody = self.form("/forgot", username="nobody")[1]  # same page: usernames can't be probed
+        self.assertIn('action="reset"', page_for_nobody)
+        self.assertIsNone(self.codes[-1])
+        self.form("/forgot", username="kid")
+        self.assertIsNone(self.codes[-1])  # one code a minute
+        wrong = "000000" if code_sent != "000000" else "111111"
+        code, page, _ = self.form("/reset", username="kid", code=wrong, password="new-password", confirm="new-password")
+        self.assertEqual(code, 400)
+        self.assertIn("didn&#x27;t match", page)
+        code, page, _ = self.form("/reset", username="kid", code=code_sent, password="new-password", confirm="other")
+        self.assertIn("don&#x27;t match", page)
+        code, _, cookie = self.form("/reset", username="kid", code=code_sent, password="new-password",
+                                    confirm="new-password")
+        self.assertEqual(code, 303)
+        self.assertEqual(self.get("/api/state", cookie=cookie)[0], 200)  # signed straight in
+        self.assertEqual(self.login("new-password", "kid")[0], 303)
+        code, page, _ = self.form("/reset", username="kid", code=code_sent, password="again-password",
+                                  confirm="again-password")
+        self.assertIn("expired", page)  # used up
+
+    def test_forgot_is_only_for_accounts(self):
+        self.set_password("correct-horse")
+        self.assertNotIn("forgot", self.get("/login")[1])
+        self.assertEqual(self.form("/forgot", username="kid")[0], 303)
+
+    def test_sign_up_link(self):
+        self.fresh_accounts()
+        code, _, cookie = self.form("/join/good-token-0123456789abc", name="Grandma", username="grandma",
+                                    password="grandma-pass", confirm="grandma-pass")
+        self.assertEqual(code, 303)
+        self.assertEqual(self.get("/api/state", cookie=cookie)[0], 200)
+        self.assertEqual(self.seen[-1]["account"]["username"], "grandma")
+        code, _, _ = self.request("POST", "/join/good-token-0123456789abc", "name=x",
+                                  {"Content-Type": "application/x-www-form-urlencoded", "Origin": "https://evil.example"})
+        self.assertEqual(code, 403)
+        for _ in range(5):
+            self.assertEqual(self.form("/join/guess-guess-guess-guess", name="x")[0], 404)
+        self.assertEqual(self.form("/join/guess-guess-guess-guess", name="x")[0], 429)  # guessing links is slowed
+
+    def test_sign_up_page(self):
+        inv = {"token": "tok<en>", "from": "Sam <b>", "watcher": True}
+        page = web.signup_page(inv, "Taken <x>", "Gr<an>dma", "gma")
+        self.assertIn("Sam &lt;b&gt; invited you", page)
+        self.assertIn("Taken &lt;x&gt;", page)
+        self.assertIn('value="Gr&lt;an&gt;dma"', page)
+        self.assertIn('action="tok&lt;en&gt;"', page)
+        self.assertIn('href="../icon.svg"', page)
 
 
 class PageTest(unittest.TestCase):

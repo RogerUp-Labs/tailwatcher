@@ -5,8 +5,10 @@ Messaging apps (SMS, iMessage, Signal) only make https:// links tappable, not
 ntfy://, so the invite page is what carries the ntfy:// button. Each invite
 is a random token for one watcher, expires (7 days by default) and can be
 cancelled. The page is public on purpose (no dashboard password) and shows
-only that one person's subscribe details. Invites carry a "kind" so group
-trips can reuse them later.
+only that one person's subscribe details. Invites carry a "kind": "watcher"
+(subscribe to one watcher's alerts) or "account" (0.23.0: a sign-up link for
+family accounts, used once, where the person picks their own username and
+password and can get a watcher of their own).
 """
 
 import datetime
@@ -53,6 +55,42 @@ def create(topic, sender="", days=DEFAULT_DAYS, now=None, path=None):
         invites.append(invite)
         save(invites, path)
     return invite
+
+
+def create_signup(sender="", days=DEFAULT_DAYS, role="member", watcher=True, now=None, path=None):
+    """A one-time sign-up link for a new family account."""
+    now = time.time() if now is None else now
+    days = max(1, min(30, int(days or DEFAULT_DAYS)))
+    invite = {"token": secrets.token_urlsafe(18), "kind": "account", "topic": None,
+              "role": "admin" if role == "admin" else "member", "watcher": bool(watcher),
+              "from": (sender or "").strip()[:40], "created": round(now), "expires": round(now + days * 86400)}
+    with INVITES_LOCK:
+        invites = [i for i in load(path) if i.get("expires", 0) > now]
+        invites.append(invite)
+        save(invites, path)
+    return invite
+
+
+def claim(token, kind, now=None, path=None):
+    """Take a live invite of this kind out of the list (sign-up links work
+    once). Returns it, or None if someone else got there first."""
+    now = time.time() if now is None else now
+    with INVITES_LOCK:
+        invites = load(path)
+        hit = next((i for i in invites if i.get("token") == token and i.get("kind", "watcher") == kind
+                    and i.get("expires", 0) > now), None)
+        if hit is not None:
+            save([i for i in invites if i is not hit], path)
+        return hit
+
+
+def restore(invite, path=None):
+    """Put back an invite claim() took, when signing up failed (a taken username)."""
+    with INVITES_LOCK:
+        invites = load(path)
+        if not any(i.get("token") == invite["token"] for i in invites):
+            invites.append(invite)
+            save(invites, path)
 
 
 def revoke(token, path=None):
@@ -137,9 +175,9 @@ def _page(title, body):
 
 
 def expired_page():
-    return _page("Invite expired", """<h1>This invite has expired</h1>
-<p class="sub">Invite links only work for a few days, or this one was cancelled.
-Ask the person who sent it for a new one.</p>""")
+    return _page("Link expired", """<h1>This link has expired</h1>
+<p class="sub">Invite and sign-up links only work for a few days, sign-up links only once,
+or this one was cancelled. Ask the person who sent it for a new one.</p>""")
 
 
 def join_page(invite, watcher_name, phone_url, server_mode="public", phone_mode="open", tz=None):

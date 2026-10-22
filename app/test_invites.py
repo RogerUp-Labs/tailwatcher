@@ -34,6 +34,18 @@ class InviteTest(unittest.TestCase):
         self.assertEqual([i["token"] for i in invites.load(self.path)], [new["token"]])  # expired one dropped
         self.assertNotEqual(old["token"], new["token"])
 
+    def test_sign_up_links_work_once(self):
+        inv = invites.create_signup("Sam", 3, "admin", False, now=NOW, path=self.path)
+        self.assertEqual((inv["kind"], inv["role"], inv["watcher"], inv["topic"]), ("account", "admin", False, None))
+        self.assertEqual(invites.create_signup(role="boss", now=NOW, path=self.path)["role"], "member")
+        self.assertIsNone(invites.claim(inv["token"], "watcher", now=NOW, path=self.path))  # wrong kind
+        got = invites.claim(inv["token"], "account", now=NOW, path=self.path)
+        self.assertEqual(got["token"], inv["token"])
+        self.assertIsNone(invites.claim(inv["token"], "account", now=NOW, path=self.path))  # used
+        invites.restore(got, path=self.path)  # the username was taken: it still works
+        self.assertIsNotNone(invites.find(inv["token"], now=NOW, path=self.path))
+        self.assertIsNone(invites.claim(inv["token"], "account", now=NOW + 4 * 86400, path=self.path))  # expired
+
     def test_join_page_links_and_escaping(self):
         inv = {"token": "t" * 24, "topic": "tw-dad-abc", "from": "<b>Sam</b>", "expires": NOW, "kind": "watcher"}
         page = invites.join_page(inv, "Dad <script>", "https://ntfy.sh")

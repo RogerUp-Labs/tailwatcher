@@ -148,9 +148,11 @@ They get a note that you shared a flight, a heads-up if the time changes or the 
 Family accounts give each person their own login, so they see only their own watchers and trips. Trips are the private part: nobody else in the household sees where you're flying unless you share the trip with them.
 
 1. Turn it on at first setup or in **⚙ Settings → Signing in to this page → Family accounts**. You pick your own username and password and become the first admin. Every existing watcher starts out as yours.
-2. Open **👥 People** and tap **+ Add person** for each family member: a username, their name and a temporary password. **Make them a watcher too** gives them their own alerts and trips.
+2. Add each family member from **👥 People**, one of two ways:
+    - **Sign-up link** (easiest; needs a public address, like invite links): text them the link. They open it, pick their own username and password, and they're signed in, with a watcher of their own and the steps to get alerts on their phone. Each link works once and expires (7 days unless you pick otherwise); cancel an unused one on the People page.
+    - **+ Add person**: you pick a username, their name and a temporary password, then send them this page's address with both. **Make them a watcher too** gives them their own alerts and trips.
 3. Already had a watcher for them? Pick their name next to it under **People** to move it to their account. Tick **give it a new topic** first if your phone was subscribed to it, so your phone stops getting their alerts.
-4. Send them the address of this page with their username and temporary password. They can change it, and their name and time zone, under **👤 My account**.
+4. Anyone can change their password, name and time zone under **👤 My account**.
 
 What each person sees:
 
@@ -167,7 +169,7 @@ Good to know:
 
 - Accounts keep things private from other people in the household, not from whoever runs the server, who can read TailWatcher's files.
 - A person's phone talks to ntfy, not to TailWatcher, so anyone subscribed to their topic still gets their alerts and can text commands to it. Their topic and **Connect phone** link only show on their own dashboard.
-- Forgot a password? An admin sets a new one with **Reset password** on the People page. For the admin, see **I lost a password**.
+- Forgot a password? Tap **Forgot your password?** on the sign-in page and type your username. TailWatcher sends a 6-digit code to your alerts in the ntfy app (your watchers' topics stand in for an email address); type it with a new password. Codes work for 10 minutes, one a minute. No watcher or no phone connected? An admin sets a new password with **Reset password** on the People page. For the admin, see **I lost a password**.
 - Each person can have their own time zone (**My account**, or **Time zone** when editing a watcher). Their alerts, replies and "until fri" use it, and shared-trip alerts come in the recipient's time zone.
 
 ## Using the dashboard
@@ -210,7 +212,7 @@ Settings that StartOS would fill in are set in docker-compose.yml instead:
 |---|---|
 | `NTFY_URL` | Your own ntfy, as TailWatcher reaches it: `http://<your NAS>:<port>`, or `http://ntfy:80` for the ntfy service in the same file. Then pick **This server's NTFY** in **⚙ Settings**. |
 | `NTFY_PHONE_URL` | The https address phones use for that ntfy, so **Connect phone** gives a one-tap link. Its certificate must be one phones trust (for example Let's Encrypt from your reverse proxy); a self-signed one gives a certificate error in the ntfy app. |
-| `TAILWATCHER_PUBLIC_URL` | TailWatcher's own https address, if you put it behind a reverse proxy. Invite links need it. |
+| `TAILWATCHER_PUBLIC_URL` | TailWatcher's own https address, if you put it behind a reverse proxy. Invite and sign-up links need it. |
 | `TAILWATCHER_PASSWORD` | Your own dashboard password instead of the generated one. |
 
 Good to know:
@@ -282,7 +284,7 @@ Topics are long and random on purpose: on ntfy.sh, the name is the only lock. On
 
 ### Someone says their invite link has expired
 
-Invites work for the number of days you picked. Open **Connect phone** for that person and create a new one.
+Invites work for the number of days you picked. Open **Connect phone** for that person and create a new one. A sign-up link also stops working once someone has used it; make a new one on the **People** page.
 
 ### The Connect phone link doesn't open the app
 
@@ -308,7 +310,7 @@ Check the key in **⚙ Settings** (paste it again to replace it). The free plan 
 ### I lost a password
 
 - **The dashboard password:** StartOS → TailWatcher → **Actions → Show Web UI Password** (or **Reset Web UI Password**). With Docker, it's in the container's log, or run `docker exec tailwatcher python /app/tailwatcher.py password` (`reset-password` makes a new one).
-- **Your family account:** ask an admin to use **Reset password** on the People page.
+- **Your family account:** tap **Forgot your password?** on the sign-in page for a code in your ntfy app, or ask an admin to use **Reset password** on the People page.
 - **The admin's family account:** StartOS → TailWatcher → **Actions → Reset Web UI Password** makes a new password for the first admin; sign in with it and change it under **My account**. With Docker, run `docker exec tailwatcher python /app/tailwatcher.py reset-password USERNAME`.
 - **NTFY's admin password:** NTFY → **Actions → Reset User Password** → admin.
 

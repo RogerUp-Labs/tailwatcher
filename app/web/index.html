@@ -1154,7 +1154,8 @@ function connectInfo(w, topic = w.topic, label = w.name) {
   return {app, web, host: u.host};
 }
 
-function connectPhone(w) {
+/** self: the person is connecting their own phone (just signed up), so no invite link. */
+function connectPhone(w, self = false) {
   const info = connectInfo(w), local = LAST.settings.ntfy_server === "local";
   const planes = w.planes_topic ? connectInfo(w, w.planes_topic, `${w.name} planes`) : null;
   const form = $("dlg-form");
@@ -1163,8 +1164,8 @@ function connectPhone(w) {
   try { sender = localStorage.getItem("tw-invite-from") || ""; } catch (e) { /* storage blocked */ }
   const publicUrl = LAST.settings.public_url;
   const mine = (LAST.invites || []).filter((i) => i.topic === w.topic);
-  form.innerHTML = `<h3 id="dlg-title">Connect ${esc(w.name)}'s phone</h3>
-    <div class="invite-box">
+  form.innerHTML = `<h3 id="dlg-title">${self ? `Welcome, ${esc(w.name)}! Get your alerts on your phone` : `Connect ${esc(w.name)}'s phone`}</h3>
+    ${self ? `<p class="muted" style="margin:0">Trip updates and flight alerts arrive in the free ntfy app. Open this page on your phone to set it up in two taps, or do it later from Connect phone on your watcher.</p>` : `<div class="invite-box">
       <h4>Send an invite link</h4>
       <div class="note">Best for texts, iMessage or Signal: a normal web link that walks them through installing ntfy and subscribing. Works from anywhere.</div>
       ${publicUrl ? "" : `<div class="warn-text">TailWatcher has no public address, so invite links only work on your home network. To send one farther, ${docker() ? "put TailWatcher behind an https address (a reverse proxy) and set TAILWATCHER_PUBLIC_URL to it" : "give TailWatcher's Web UI a public address in StartOS (for example with StartTunnel)"}.</div>`}
@@ -1175,15 +1176,15 @@ function connectPhone(w) {
       </div>
       <div id="inv-out"></div>
       ${mine.length ? `<div class="invite-list">${mine.map((i) => `<div>Invite ${i.from ? "from " + esc(i.from) + " " : ""}works until ${fmtDay(i.expires)} · <button type="button" class="linkbtn" data-revoke="${esc(i.token)}">Cancel</button></div>`).join("")}</div>` : ""}
-    </div>
+    </div>`}
     <div class="connect"><ol>
-      <li>Install the free <b>ntfy</b> app on their phone.
+      <li>Install the free <b>ntfy</b> app on ${self ? "your" : "their"} phone.
         <div class="stores">
           <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener noreferrer">Google Play</a>
           <a href="https://f-droid.org/packages/io.heckel.ntfy/" target="_blank" rel="noopener noreferrer">F-Droid</a>
           <a href="https://apps.apple.com/us/app/ntfy/id1625396347" target="_blank" rel="noopener noreferrer">App Store</a>
         </div></li>
-      ${info ? `<li>Or, with their phone in hand, tap this link on it. The ntfy app opens with ${esc(w.name)}'s alerts ready to subscribe:
+      ${info ? `<li>${self ? "Then tap this link on your phone" : "Or, with their phone in hand, tap this link on it"}. The ntfy app opens with ${self ? "your" : esc(w.name) + "'s"} alerts ready to subscribe:
         <a class="bigLink" href="${esc(info.app)}">${esc(info.app)}</a>
         <div class="row-btns">
           <button type="button" class="btn primary" id="cp-share">Send link</button>
@@ -1202,13 +1203,13 @@ function connectPhone(w) {
         <button type="button" class="btn" id="cp-login">Create NTFY login</button></div>
         <div class="note">Admin password used once, not saved.</div><div id="cp-login-out"></div></li>`
       : local && !docker() && !LAST.settings.ntfy_token_set ? `<li class="note">This server's NTFY isn't set up yet: open ⚙ Settings and use "Set up NTFY for me".</li>` : ""}
-      ${LAST.settings.text_commands ? `<li>They can also type in that topic to manage their list. "help" shows the commands.</li>` : ""}
+      ${LAST.settings.text_commands ? `<li>${self ? "You can also type in that topic to manage your list" : "They can also type in that topic to manage their list"}. "help" shows the commands.</li>` : ""}
     </ol></div>
     <div class="dlg-actions"><button type="button" class="linkbtn help-link" data-act="help" data-section="connecting-a-phone" style="margin-right:auto">? Help with connecting</button><button type="button" class="btn" id="dlg-cancel">Done</button></div>`;
   form.onsubmit = (e) => e.preventDefault();
   $("dlg-cancel").onclick = () => $("dlg").close();
   const inviteBase = (publicUrl || location.origin).replace(/\/+$/, "") + "/";
-  $("inv-create").onclick = async () => {
+  if ($("inv-create")) $("inv-create").onclick = async () => {
     const from = $("inv-from").value.trim();
     try { localStorage.setItem("tw-invite-from", from); } catch (e) { /* storage blocked */ }
     const r = await api("api/invite", {op: "create", topic: w.topic, from, days: Number($("inv-days").value)});
@@ -1571,12 +1572,18 @@ function openPeople() {
       ${a.watchers.length ? a.watchers.map((w) => watcherRow(w, a.id)).join("") : `<div class="person-w muted">No watchers</div>`}
     </div>`).join("")}
     ${(LAST.unassigned || []).length ? `<div class="person"><div class="person-head"><b>Not anyone's yet</b><small>Admins see these. Pick who each belongs to.</small></div>${LAST.unassigned.map((w) => watcherRow(w, "")).join("")}</div>` : ""}
+    ${(LAST.signups || []).length ? `<div class="invite-list">${LAST.signups.map((i) => `<div>Sign-up link for a ${i.role === "admin" ? "new admin" : "new member"}${i.watcher ? " with a watcher" : ""}, works until ${fmtDay(i.expires)} · <button type="button" class="linkbtn" data-unlink="${esc(i.token)}">Cancel</button></div>`).join("")}</div>` : ""}
     <label class="field check"><input type="checkbox" id="pp-newtopic"> When moving a watcher, give it a new topic<small>So a phone subscribed to the old one stops getting its alerts. Reconnect their phone after.</small></label>
     <div class="form-error" id="dlg-err" role="alert"></div>
-    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Done</button><button type="button" class="btn primary" id="pp-add">+ Add person</button></div>`;
+    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Done</button><button type="button" class="btn" id="pp-link">Sign-up link</button><button type="button" class="btn primary" id="pp-add">+ Add person</button></div>`;
   form.onsubmit = (e) => e.preventDefault();
   $("dlg-cancel").onclick = () => $("dlg").close();
   $("pp-add").onclick = () => personForm(null);
+  $("pp-link").onclick = signupLink;
+  form.querySelectorAll("[data-unlink]").forEach((b) => b.onclick = async () => {
+    const r = await api("api/accounts", {op: "unlink", token: b.dataset.unlink});
+    toast(r.message); $("dlg").close(); await load(); openPeople();
+  });
   form.querySelectorAll("[data-person]").forEach((b) => b.onclick = () => personForm(list.find((a) => a.id === b.dataset.person)));
   form.querySelectorAll("[data-reset]").forEach((b) => b.onclick = async () => {
     const a = list.find((x) => x.id === b.dataset.reset);
@@ -1592,6 +1599,39 @@ function openPeople() {
   });
   $("dlg").addEventListener("close", () => $("dlg").classList.remove("wide"), {once: true});
   $("dlg").showModal();
+}
+
+/** A one-time link a new person opens to pick their own username and password. */
+function signupLink() {
+  const form = $("dlg-form"), publicUrl = LAST.settings.public_url;
+  form.innerHTML = `<h3 id="dlg-title">Sign-up link</h3>
+    <p class="muted" style="margin:0">Text this to someone new. They open it, pick their own username and password, and they're signed in. It works once.</p>
+    ${publicUrl ? "" : `<div class="warn-text">TailWatcher has no public address, so this link only works on your home network. ${docker() ? "Set TAILWATCHER_PUBLIC_URL to send it farther." : "Give TailWatcher's Web UI a public address in StartOS to send it farther."}</div>`}
+    <label class="field">They'll be ${sel("role", "member", [["member", "Member: their own watchers and trips"], ["admin", "Admin: also ⚙ Settings and People"]])}</label>
+    <label class="field check"><input type="checkbox" name="watcher" checked> Make them a watcher (their own alerts and trips)</label>
+    <label class="field">Link works for ${sel("days", "7", [["1", "1 day"], ["3", "3 days"], ["7", "7 days"], ["14", "14 days"], ["30", "30 days"]])}</label>
+    <div id="su-out"></div>
+    <div class="form-error" id="dlg-err" role="alert"></div>
+    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Back</button><button type="submit" class="btn primary" id="su-make">Create link</button></div>`;
+  $("dlg-cancel").onclick = async () => { $("dlg").close(); await load(); openPeople(); };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const el = form.elements;
+    const r = await api("api/accounts", {op: "link", role: el.role.value, watcher: el.watcher.checked, days: Number(el.days.value)});
+    if (!r.ok) { $("dlg-err").textContent = r.message; return; }
+    const link = (publicUrl || location.origin).replace(/\/+$/, "") + "/" + r.path;
+    const message = `Make your TailWatcher account for flight alerts and trips: ${link}`;
+    $("su-make").hidden = true;
+    $("su-out").innerHTML = `<a class="bigLink" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(link)}</a>
+      <div class="row-btns"><button type="button" class="btn primary" id="su-share">Send link</button><button type="button" class="btn" id="su-copy">Copy link</button></div>
+      <div class="note">Works once, until ${fmtDay(r.expires)}. Whoever opens it first gets the account, so send it only to them.</div>`;
+    $("su-copy").onclick = async () => { try { await navigator.clipboard.writeText(link); toast("Link copied."); } catch (err) { toast("Press and hold the link to copy it."); } };
+    $("su-share").onclick = async () => {
+      if (navigator.share) { try { await navigator.share({title: "TailWatcher", text: message}); } catch (err) { /* cancelled */ } }
+      else { try { await navigator.clipboard.writeText(message); toast("Message copied. Paste it into a text to them."); } catch (err) { toast("Copy the link above and send it to them."); } }
+    };
+  };
+  if (!$("dlg").open) $("dlg").showModal();
 }
 
 function personForm(a) {
@@ -1765,6 +1805,15 @@ function render(d) {
   if (me.setup && me.admin && !SETUP_SHOWN && !$("dlg").open && !$("help").open) openSetup();
 }
 
+/** Just signed up with a sign-up link: help them connect their phone first. */
+function welcome() {
+  if (location.hash !== "#welcome") return;
+  history.replaceState(null, "", location.pathname + location.search);
+  const w = (LAST.watchers || [])[0];
+  toast(`Welcome to TailWatcher${LAST.me.account ? ", " + LAST.me.account.name : ""}!`);
+  if (w && !$("dlg").open) connectPhone(w, true);
+}
+
 async function load() {
   try {
     // Built from origin + path: a page opened as https://user:pass@host/ would
@@ -1774,6 +1823,7 @@ async function load() {
     if (r.status === 401) { location.href = location.pathname.replace(/[^/]*$/, "") + "login"; return; }  // signed out
     if (!r.ok) throw new Error("HTTP " + r.status);
     render(await r.json());
+    welcome();
   } catch (err) {
     $("dot").className = "dot bad";
     $("statusText").textContent = "Can't reach TailWatcher (" + err.message + ")";
