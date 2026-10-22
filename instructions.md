@@ -92,14 +92,14 @@ Before a flight, the plane you'll fly on is usually still finishing an earlier f
 **Add a trip** with **+ Add trip** on the dashboard, or by text:
 
 - **Without an AeroDataBox key**, say which plane it is. Your airline app usually shows it under "Where's my plane?": `inbound UA1234 N38473 dep 4:30pm` (or the inbound flight number instead of the tail). Add `tomorrow`, a date `10/20` and `from IAD` if needed.
-- **With an AeroDataBox key**, `inbound UA1234 11/14` is enough. TailWatcher looks up your departure time, finds the assigned plane once the airline picks one, and tells you if the plane or your time changes. It checks weekly when the trip is far off, daily in the last two weeks, and four times on the last day: about 20 of the free plan's 400 monthly requests for a trip booked a month ahead.
+- **With an AeroDataBox key**, `inbound UA1234 11/14` is enough. TailWatcher looks up your departure time, finds the assigned plane once the airline picks one, and tells you if the plane or your time changes. It checks weekly when the trip is far off, daily in the last 3 days, and four times on the last day: about 16 lookups for a flight booked a month or two ahead. The free plan allows 400 units a month and most lookups count as 2, so that's roughly a dozen flights a month for everyone on your server together. **⚙ Settings** shows how much is left this month.
 
 **Round trips.** Going and coming back? Enter both flights at once: open **Return flight** on **+ Add trip** and fill it in, or text `inbound UA1234 11/14 return UA5678 11/21`. Without an AeroDataBox key, give each flight its plane and time: `inbound UA1234 N38473 11/14 dep 4:30pm return UA5678 N12345 11/21 dep 6pm`. Already added your flight out? Text `return 1 UA5678 11/21` to add the flight home to trip 1.
 
 - The flight home leaves from where your flight out lands. Add `from LAS` after the return flight if it doesn't.
 - Times you type are local to the airport the flight leaves from: `dep 6pm from LAS` means 6pm in Las Vegas. If TailWatcher doesn't know that airport yet (no AeroDataBox key and no `from`), it reads the time in its own time zone (**⚙ Settings**), so add `from LAS` to a return that leaves from another time zone. Messages and the dashboard always show times in TailWatcher's time zone.
 - Both flights are listed together and numbered one after the other. `change` edits one flight; `share` and `cancel` cover both, unless you add `only` (`cancel 2 only`).
-- With an AeroDataBox key, each flight is checked on its own schedule, so a round trip booked a month ahead uses about 40 of the 400 free monthly requests.
+- With an AeroDataBox key, each flight is checked on its own schedule, so a round trip uses twice the lookups of one flight.
 
 **Connecting flights.** Changing planes on the way? Add the next flight with `then`: `inbound UA1234 11/14 then UA567`, or tap **+ Add connection** on **+ Add trip** once for each flight after the first. It works on the way back too: **+ Add return connection**, or `… return UA5678 11/21 then UA910`. Already added the first flight? Text `connect 1 UA567`, or **Edit** the last flight and add it there. Up to 8 flights in a row each way.
 
@@ -109,6 +109,8 @@ Before a flight, the plane you'll fly on is usually still finishing an earlier f
 - Each flight still gets its own where's-my-plane alerts. All the flights are listed and numbered together; `share` and `cancel` cover them all unless you add `only`.
 
 **A flight with a stop** (one flight number, e.g. Chicago → Denver → Las Vegas): with an AeroDataBox key TailWatcher assumes you board where the flight starts and stay on to the end, and says so. Add `from DEN` if you board at the stop, or `to DEN` if you get off there. Family you share it with get the landing alert at your destination, not at the stop.
+
+**Trip reminders.** Want a heads-up before you go? **Edit** your watcher and pick a **Trip reminder**: 1, 2 or 3 days or a week before. Each trip then sends a note with the flight, its time and the plane (once one is assigned), plus any connections. A round trip gets one before each direction. It's off unless you turn it on.
 
 **If the airline renumbers or cancels your flight**, TailWatcher notices on its next check, tells you, and suggests the likely new flight number. Reply with the `change` it suggests to switch; it never switches by itself.
 
@@ -305,7 +307,7 @@ With an AeroDataBox key, TailWatcher tells you and suggests the new flight numbe
 
 ### AeroDataBox says the key was rejected or the quota is used up
 
-Check the key in **⚙ Settings** (paste it again to replace it). The free plan resets monthly; TailWatcher keeps tracking trips you entered by hand meanwhile.
+Check the key in **⚙ Settings** (paste it again to replace it); it also shows how much of this month's allowance is left. The free plan resets monthly; TailWatcher keeps tracking trips you entered by hand meanwhile, and tries AeroDataBox again about once an hour.
 
 ### I lost a password
 

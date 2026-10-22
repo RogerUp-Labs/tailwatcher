@@ -49,7 +49,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.23.0"
+VERSION = "0.24.0"
 # "startos" (main.ts sets it) or "docker" (the Dockerfile's default): only
 # changes setup hints and whether the dashboard password starts on.
 PLATFORM = os.environ.get("TW_PLATFORM", "startos")
@@ -138,6 +138,8 @@ def load_config(path=CONFIG_PATH, now=None):
                 # blank = the server's. tz_set is what's stored, for the edit form.
                 "time_zone": w.get("timeZone") or time_zone,
                 "tz_set": w.get("timeZone") or "",
+                # Days before each flight to send a reminder (0.24.0); 0 = off.
+                "trip_reminder": w.get("tripReminder") if w.get("tripReminder") in trips.REMINDER_DAYS else 0,
             })
     web_auth, needs_setup = auth_mode(raw)
 
@@ -969,7 +971,9 @@ def run():
                         t["replacement"] = trips.find_replacement(t, cfg["adb_key"], USER_AGENT)
                 except trips.AdbError as e:
                     errors.append(str(e))
+                    t["adb_wait"] = now + e.wait  # not again every cycle: failed calls can count too
                     continue
+                t.pop("adb_wait", None)
                 mine = trips.ordered([x for x in active if x["topic"] == t["topic"]])
                 number = next(i for i, x in enumerate(mine, 1) if x is t)
                 for m in trips.change_messages(t, notes, tz(t["topic"]), number):
@@ -981,6 +985,16 @@ def run():
                 for m in trips.connection_notes(t, nxt, tz(t["topic"])) if nxt else []:
                     changed = True
                     to_owner(t, *m)
+            for t in active:
+                days = by_topic[t["topic"]]["trip_reminder"]
+                if trips.connects_from(t, active) or not trips.reminder_due(t, days, now):
+                    continue
+                then, nxt = [], trips.connects_to(t, active)
+                while nxt:
+                    then.append(nxt)
+                    nxt = trips.connects_to(nxt, active)
+                t["reminded"], changed = True, True
+                to_owner(t, *trips.reminder_message(t, days, tz(t["topic"]), then))
 
             live = [t for t in active if not t.get("landed") and trips.is_live(t, now)]
             own = [t for t in active if trips.own_live(t, now, trips.connects_to(t, active) is not None)]
@@ -1080,6 +1094,7 @@ def run():
             watchers_out.append({"name": w["name"], "topic": w["topic"], "id": wid(w["topic"]),
                                  "planes_topic": w["planes_topic"], "priority": w["priority"],
                                  "time_zone": w["tz_set"], "notify_landing": w["notify_landing"],
+                                 "trip_reminder": w["trip_reminder"],
                                  "aircraft": aircraft})
         trips_out, shared_out = [], []
         all_trips = trips.load()
@@ -1137,6 +1152,7 @@ def run():
                   for w in cur["watchers"]]
         settings = {"poll_seconds": cur["poll_seconds"], "data_source": cur["data_source"],
                     "text_commands": cur["text_commands"], "aerodatabox": bool(cur["adb_key"]),
+                    "aerodatabox_usage": trips.load_usage() if cur["adb_key"] else None,
                     "ntfy": bool(resolve_ntfy(cur)[0]), "ntfy_server": cur["ntfy_server"],
                     "phone_url": resolve_ntfy(cur)[2], "ntfy_phone_mode": cur["ntfy_phone_mode"],
                     "time_zone": cur["time_zone"], "time_zones": [[k, v] for k, v in edits.TIME_ZONES.items()],
@@ -1531,7 +1547,7 @@ def run():
                                              bool(data.get("notifyLanding")),
                                              new_topic_requested=bool(data.get("newTopic")),
                                              planes=data.get("planes"), time_zone=data.get("timeZone"),
-                                             result=result)
+                                             reminder=data.get("tripReminder"), result=result)
                     topic = result["topic"]
                     if original and original != topic:
                         accounts.rename_topic(original, topic)

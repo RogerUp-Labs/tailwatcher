@@ -56,12 +56,13 @@ def _uses(w, topic):
 
 
 def save_watcher(path, original, name, topic, priority="default", notify_landing=False, trips_path=None,
-                 new_topic_requested=False, planes=None, time_zone=None, result=None):
+                 new_topic_requested=False, planes=None, time_zone=None, reminder=None, result=None):
     """Add a watcher (original=None) or update the one whose topic is `original`.
     A blank topic gets a new unguessable one (new watchers) or stays as it was.
     planes: True gives them a separate Planes topic (kept if they have one),
     False puts plane alerts back in the main topic, None leaves it as it is.
-    time_zone: theirs ("" = the server's), None leaves it. The saved topic
+    time_zone: theirs ("" = the server's), None leaves it. reminder: days
+    before each flight for a trip reminder (0 = off), None leaves it. The saved topic
     goes in result["topic"]."""
     name, topic = (name or "").strip()[:40], (topic or "").strip()
     if not name:
@@ -74,6 +75,13 @@ def save_watcher(path, original, name, topic, priority="default", notify_landing
         raise EditError("Pick a priority: low, default, high or max.")
     if time_zone not in (None, "") and time_zone not in TIME_ZONES:
         raise EditError("Pick a time zone from the list.")
+    if reminder is not None:
+        try:
+            reminder = int(reminder)
+        except (TypeError, ValueError):
+            reminder = -1
+        if reminder not in trips.REMINDER_DAYS:
+            raise EditError("Pick when to send trip reminders from the list.")
     with commands.CONFIG_LOCK:
         raw = commands.read_raw(path)
         watchers = raw.setdefault("watchers", [])
@@ -94,6 +102,8 @@ def save_watcher(path, original, name, topic, priority="default", notify_landing
             current["planesTopic"] = (keep or new_topic(name, "planes")) if planes else ""
         if time_zone is not None:
             current["timeZone"] = time_zone
+        if reminder is not None:
+            current["tripReminder"] = reminder
         commands.write_raw(path, raw)
     if original and original != topic:
         rename_trip_topic(original, topic, trips_path)

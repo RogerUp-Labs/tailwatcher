@@ -705,13 +705,22 @@ $("feed").addEventListener("click", (ev) => {
 });
 NARROW.addEventListener("change", () => { if (LAST) renderFeed(LAST); });
 
+// RapidAPI's quota headers as trips.record_usage() kept them: "312 of 400 units left, resets Nov 1".
+function adbUsage(u) {
+  if (!u || !u.quotas) return "";
+  const q = Object.entries(u.quotas).sort(([a], [b]) => (a === "requests") - (b === "requests"));
+  const reset = q.map(([, v]) => v.reset).find(Boolean);
+  return q.map(([k, v]) => `${v.remaining}${v.limit ? ` of ${v.limit}` : ""} ${k.replace(/-/g, " ")} left`).join(", ")
+    + (reset ? `, resets ${new Intl.DateTimeFormat(undefined, {month: "short", day: "numeric", timeZone: TZ}).format(reset * 1000)}` : "");
+}
+
 function renderSystem(d) {
   const s = d.settings, h = d.health;
   const rows = [
     ["Watcher", h.ok ? `<span class="ok">● running</span>` : `<span class="bad">● needs attention</span>`],
     ["NTFY", s.ntfy ? `<span class="ok">connected</span>` : `<span class="bad">not reachable</span>`],
     ["Text commands", !s.text_commands ? `<span class="muted">off</span>` : s.listening.length ? `<span class="ok">listening</span> <span class="muted">· ${s.listening.length} topic${s.listening.length === 1 ? "" : "s"}</span>` : `<span class="bad">can't read topics</span>`],
-    ["Trip lookups", s.aerodatabox ? `<span class="ok">AeroDataBox</span>` : `<span class="muted">manual (no key)</span>`],
+    ["Trip lookups", s.aerodatabox ? `<span class="ok">AeroDataBox</span>${adbUsage(s.aerodatabox_usage) ? ` <span class="muted">· ${esc(adbUsage(s.aerodatabox_usage))}</span>` : ""}` : `<span class="muted">manual (no key)</span>`],
     ["ADS-B feed", esc(s.data_source)],
     ["Checks every", s.poll_seconds + " s"],
   ];
@@ -1139,6 +1148,9 @@ function watcherForm(w) {
       {name: "timeZone", label: "Time zone", type: "select", value: w ? w.time_zone : "",
        options: [["", `Same as the server (${LAST.settings.time_zone.replace("_", " ")})`], ...LAST.settings.time_zones],
        hint: "For their alerts, replies and \"until fri\"."},
+      {name: "tripReminder", label: "Trip reminder", type: "select", value: String(w ? w.trip_reminder : 0),
+       options: [["0", "Off"], ["1", "1 day before"], ["2", "2 days before"], ["3", "3 days before"], ["7", "1 week before"]],
+       hint: "A note with each trip's flight, time and plane before it leaves."},
       ...(w ? [{name: "newTopic", label: "Give them a new topic (then reconnect their phone)", type: "check", value: false}] : []),
     ],
     save: async (v) => {
@@ -1699,7 +1711,7 @@ function openSettings() {
     <div class="set-section"><h4>Trips</h4>
       <label class="field">AeroDataBox API key (optional)
         <input name="aerodataboxKey" type="password" placeholder="${s.aerodatabox ? "Saved. Type a new one to replace it" : "RapidAPI key"}" autocomplete="off">
-        <small>Lets "inbound UA1234" find the plane flying in for your flight. Free Basic plan at rapidapi.com/aedbx-aedbx/api/aerodatabox.</small></label>
+        <small>Lets "inbound UA1234" find the plane flying in for your flight. Free Basic plan at rapidapi.com/aedbx-aedbx/api/aerodatabox.${s.aerodatabox ? ` This month: ${esc(adbUsage(s.aerodatabox_usage) || "shown after the next lookup")}. Each flight takes about 16 lookups, most in its last 3 days.` : ""}</small></label>
       ${s.aerodatabox ? `<label class="field check"><input type="checkbox" name="clearAerodatabox"> Remove the saved key</label>` : ""}
     </div>
     <div class="set-section"><h4>Checking</h4>

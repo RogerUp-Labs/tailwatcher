@@ -329,8 +329,9 @@ export const configure = sdk.Action.withInput(
           })),
           notifyLanding: w.notifyLanding,
           priority: w.priority,
-          // Set in the Web UI; the form doesn't show it, so keep what's there.
+          // Set in the Web UI; the form doesn't show them, so keep what's there.
           timeZone: prev?.watchers.find((p) => p.topic === topic)?.timeZone ?? '',
+          tripReminder: prev?.watchers.find((p) => p.topic === topic)?.tripReminder ?? 0,
         }
       }),
       ntfyToken: input.ntfyToken ?? '',
