@@ -7,7 +7,7 @@ export const showPassword = sdk.Action.withoutInput(
   async () => ({
     name: 'Show Web UI Password',
     description:
-      'The dashboard password, used only when "Require Web UI Password" is on in Configure. Your browser asks for a username too; anything works.',
+      'The dashboard password, used when Web UI sign-in is "One shared password". With family accounts it is only the first admin\'s password if they never changed it; use Reset Web UI Password if the admin is locked out.',
     warning: null,
     allowedStatuses: 'any',
     group: 'Web UI',
@@ -23,7 +23,7 @@ export const showPassword = sdk.Action.withoutInput(
     return {
       version: '1',
       title: 'Web UI Password',
-      message: 'Use any username with this password.',
+      message: 'Sign in to the Web UI with this password.',
       result: {
         type: 'single',
         value: password,
@@ -40,7 +40,8 @@ export const resetPassword = sdk.Action.withoutInput(
 
   async () => ({
     name: 'Reset Web UI Password',
-    description: 'Make a new dashboard password. The old one stops working right away.',
+    description:
+      'Make a new dashboard password. The old one stops working right away. With family accounts, it becomes the first admin\'s new password (for when they are locked out).',
     warning: 'Anyone using the old password will be asked for the new one.',
     allowedStatuses: 'any',
     group: 'Web UI',
@@ -53,7 +54,8 @@ export const resetPassword = sdk.Action.withoutInput(
     return {
       version: '1',
       title: 'New Web UI Password',
-      message: 'Use any username with this password.',
+      message:
+        'Sign in with this password. With family accounts, it is now the first admin\'s password: sign in with their username, then change it under My account.',
       result: { type: 'single', value: password, masked: true, copyable: true, qr: false },
     }
   },

@@ -43,6 +43,8 @@ const watcher = z.object({
   aircraft: z.array(aircraft).catch([]),
   notifyLanding: z.boolean().catch(false),
   priority: priority.catch('default'),
+  /** Their own time zone (0.22.0); blank = the server's `timeZone`. Set in the Web UI. */
+  timeZone: z.string().catch(''),
 })
 
 /**
@@ -57,7 +59,7 @@ const shape = z.object({
   dataSource: z.enum(['adsb.lol', 'adsb.fi']).catch('adsb.fi'),
   mapLinks: z.enum(['adsbx', 'adsblol', 'both']).catch('adsbx'),
   textCommands: z.boolean().catch(true),
-  /** IANA zone for text commands like "until fri". */
+  /** Default IANA zone for text commands like "until fri"; each watcher can have their own. */
   timeZone: z
     .enum(Object.keys(timeZones) as [TimeZone, ...TimeZone[]])
     .catch('America/New_York'),
@@ -72,8 +74,14 @@ const shape = z.object({
   ntfyPhoneMode: z.enum(['open', 'login']).catch('open'),
   /** Optional RapidAPI key for AeroDataBox; lets "inbound UA1234" find the plane itself. */
   aerodataboxKey: z.string().catch(''),
-  /** Ask for the Web UI password (webui.json). Off: the dashboard is open to anyone who can reach it. */
+  /** 0.21 and older: ask for the Web UI password (webui.json). Still written, as webAuth !== 'off'. */
   webPassword: z.boolean().catch(false),
+  /**
+   * How people sign in to the Web UI (0.22.0): off, password (one shared
+   * password from webui.json), or accounts (family accounts, app/accounts.py).
+   * Missing on older installs, which follow webPassword.
+   */
+  webAuth: z.enum(['off', 'password', 'accounts']).optional().catch(undefined),
 })
 
 export type Config = z.infer<typeof shape>

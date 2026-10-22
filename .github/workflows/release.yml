@@ -161,10 +161,11 @@ jobs:
             sleep 1
           done
           echo
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)" = 303  # to the sign-in page
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/state)" = 401
           PW=$(docker exec tw python /app/tailwatcher.py password)
           curl -fsS -u "x:$PW" http://localhost:8080/api/state | python3 -c \
-            "import json,sys; d=json.load(sys.stdin); assert d['settings']['platform'] == 'docker', d['settings']; print('version', d['version'])"
+            "import json,sys; d=json.load(sys.stdin); assert d['settings']['platform'] == 'docker', d['settings']; assert d['me']['setup'], d['me']; print('version', d['version'])"
           docker logs tw 2>&1 | grep -q "Web UI password"
           docker rm -f tw
 

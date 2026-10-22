@@ -80,7 +80,7 @@ class JoinRouteTest(unittest.TestCase):
                 f.write(body)
         public = lambda token: (200, f"<h1>invite {token}</h1>") if token == "good" * 6 else (404, "expired")
         cls.srv = web.serve(0, Health(), lambda: {}, password_path=cls.pw, web_dir=d,
-                            require_password=lambda: True, public=public)
+                            mode=lambda: "password", public=public)
         cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
 
     @classmethod
@@ -100,7 +100,10 @@ class JoinRouteTest(unittest.TestCase):
         self.assertIn("noindex", headers.get("X-Robots-Tag", ""))
         self.assertEqual(self.get("/join/nope")[0], 404)
         self.assertEqual(self.get("/icon.svg")[0], 200)
-        self.assertEqual(self.get("/")[0], 401)
+        code, body, _ = self.get("/")  # sent to the sign-in page
+        self.assertEqual(code, 200)
+        self.assertIn("Sign in", body)
+        self.assertNotIn("<title>dash</title>", body)
         self.assertEqual(self.get("/api/state")[0], 401)
 
 

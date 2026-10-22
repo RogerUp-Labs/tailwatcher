@@ -100,7 +100,7 @@ class PostGuardTest(unittest.TestCase):
         cls.calls = []
         d = tempfile.mkdtemp()
         cls.srv = web.serve(0, Health(), lambda: {}, password_path=os.path.join(d, "none.json"), web_dir=d,
-                            post=lambda path, data: (cls.calls.append((path, data)) or (200, {"ok": True})))
+                            post=lambda path, data, viewer: (cls.calls.append((path, data)) or (200, {"ok": True})))
         cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
 
     @classmethod

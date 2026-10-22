@@ -18,6 +18,7 @@ export const v0_2_0 = VersionInfo.of({
             name: 'Me',
             topic: typeof raw.ntfyTopic === 'string' ? raw.ntfyTopic : 'tailwatcher',
             planesTopic: '',
+            timeZone: '',
             aircraft: (raw.aircraft as { tail: string; label: string }[]).map(
               (a) => ({ ...a, kind: 'tail' as const, expires: null }),
             ),

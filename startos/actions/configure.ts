@@ -206,11 +206,16 @@ const inputSpec = InputSpec.of({
     masked: true,
     placeholder: 'RapidAPI key',
   }),
-  webPassword: Value.toggle({
-    name: 'Require Web UI Password',
+  webAuth: Value.select({
+    name: 'Web UI Sign-in',
     description:
-      'Off: the dashboard opens without a login for anyone who can reach it (on StartOS 0.4 that is your local network and VPN unless you add a public address). On: the browser asks for a password (any username); see "Show Web UI Password".',
-    default: false,
+      'No sign-in: the dashboard opens for anyone who can reach it (on StartOS 0.4 that is your local network and VPN unless you add a public address). One shared password: see "Show Web UI Password". Family accounts: each person signs in with their own username and sees only their own watchers and trips; add people on the Web UI\'s People page. If nobody can sign in yet, TailWatcher makes "admin" with the Web UI password.',
+    default: 'off',
+    values: {
+      off: 'No sign-in',
+      password: 'One shared password',
+      accounts: 'Family accounts',
+    },
   }),
   mapLinks: Value.select({
     name: 'Map Buttons',
@@ -267,6 +272,7 @@ export const configure = sdk.Action.withInput(
     const now = Date.now() / 1000
     return {
       ...c,
+      webAuth: c.webAuth ?? (c.webPassword ? 'password' : 'off'),
       ntfyToken: c.ntfyToken || null,
       ntfyCustomUrl: c.ntfyCustomUrl || null,
       aerodataboxKey: c.aerodataboxKey || null,
@@ -323,6 +329,8 @@ export const configure = sdk.Action.withInput(
           })),
           notifyLanding: w.notifyLanding,
           priority: w.priority,
+          // Set in the Web UI; the form doesn't show it, so keep what's there.
+          timeZone: prev?.watchers.find((p) => p.topic === topic)?.timeZone ?? '',
         }
       }),
       ntfyToken: input.ntfyToken ?? '',
@@ -335,7 +343,8 @@ export const configure = sdk.Action.withInput(
       ntfyServer: input.ntfyServer,
       ntfyPhoneMode: prev?.ntfyPhoneMode ?? 'open',
       ntfyCustomUrl: input.ntfyCustomUrl?.trim() ?? '',
-      webPassword: input.webPassword,
+      webAuth: input.webAuth,
+      webPassword: input.webAuth !== 'off',
     })
     return null
   },

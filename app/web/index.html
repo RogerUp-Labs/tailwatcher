@@ -255,8 +255,12 @@ dialog h3 { margin: 0 0 2px; font-size: 17px; }
 .checks label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--text); font-size: 14px; cursor: pointer; }
 .checks input { width: 16px; height: 16px; margin: 0; }
 .checks small { color: var(--text-3); font-size: 12px; }
-.following { padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text-2); display: grid; gap: 2px; }
-.following b { color: var(--text); font-family: var(--mono); }
+.person { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.person-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.person-head small { color: var(--text-3); font-size: 12.5px; }
+.person-head .row-btns { margin-left: auto; display: flex; gap: 12px; font-size: 13px; }
+.person-w { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
+.person-w select { font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text); margin-left: auto; }
 .form-error { color: var(--bad); font-size: 13px; white-space: pre-line; }
 .connect ol { margin: 0; padding-left: 20px; display: grid; gap: 12px; font-size: 14px; color: var(--text); }
 .connect .stores { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
@@ -436,7 +440,9 @@ body:has(dialog.help-page[open]) { overflow: hidden; }
     <div class="brand">TailWatcher<small id="sub">Takeoff alerts for the planes you follow</small></div>
     <div class="status" role="status" aria-live="polite"><i class="dot wait" id="dot"></i><span id="statusText">Loading…</span></div>
     <button type="button" class="gear" data-act="help" aria-label="Help">?<span class="gear-label"> Help</span></button>
-    <button type="button" class="gear" data-act="settings" aria-label="Settings">⚙<span class="gear-label"> Settings</span></button>
+    <button type="button" class="gear" data-act="people" id="btn-people" aria-label="People" hidden>👥<span class="gear-label"> People</span></button>
+    <button type="button" class="gear" data-act="settings" id="btn-settings" aria-label="Settings">⚙<span class="gear-label"> Settings</span></button>
+    <button type="button" class="gear" data-act="me" id="btn-me" aria-label="Account" hidden>👤<span class="gear-label" id="me-label"> Account</span></button>
     <div class="themes" role="group" aria-label="Theme">
       <button type="button" data-theme="modern">Modern</button>
       <button type="button" data-theme="board">Board</button>
@@ -448,6 +454,7 @@ body:has(dialog.help-page[open]) { overflow: hidden; }
   <div class="stats" id="stats"></div>
   <div class="grid">
     <div class="col">
+      <section aria-labelledby="h-shared" id="sec-shared" hidden><h2 id="h-shared">Shared with me <span class="count" id="c-shared">0</span></h2><div class="card" id="shared"></div></section>
       <section aria-labelledby="h-trips"><h2 id="h-trips">Trips <span class="count" id="c-trips">0</span><button type="button" class="linkbtn add" data-act="add-trip">+ Add trip</button><button type="button" class="linkbtn add" data-act="import-trip">Import</button></h2><div class="card" id="trips"></div></section>
       <section aria-labelledby="h-watch"><h2 id="h-watch">Watchers <span class="count" id="c-watch">0</span><button type="button" class="linkbtn add" data-act="add-watcher">+ Add watcher</button></h2><div id="watchers"></div></section>
     </div>
@@ -538,7 +545,6 @@ function renderWatchers(d) {
           <button type="button" class="linkbtn" data-act="edit-watcher" data-topic="${esc(w.topic)}">Edit</button>
         </div>
       </div>
-      ${followingHtml(w)}
       ${w.aircraft.length ? sorted(w.aircraft).map((a) => {
         const link = mapLink(a);
         const meta = [
@@ -617,7 +623,7 @@ function tripCard(t) {
   const inb = t.inbound || {};
   const plane = inb.tail || inb.flight;
   const rows = [];
-  if (plane) rows.push(["Your plane", `${esc(inb.tail || "")}${inb.tail && inb.flight ? " · " : ""}${esc(inb.flight || "")}${inb.origin ? ` from ${esc(inb.origin)}` : ""}${inb.arr_time ? `, due ${fmtTime(inb.arr_time)}` : ""}`]);
+  if (plane) rows.push(["Your plane", `${esc(inb.tail || "")}${inb.tail && inb.flight ? " · " : ""}${esc(inb.flight || "")}${inb.origin ? ` from ${esc(inb.origin)}` : ""}${inb.arr_time ? `, due ${fmtTime(inb.arr_time)}` : ""}${t.inbound_where && !t.landed ? ` · 📍 ${esc(t.inbound_where)}${liveMap(t.inbound_hex)}` : ""}`]);
   if (t.departed && !t.landed && t.eta_sent) rows.push(["Arriving", `around ${fmtTime(t.eta_sent)}${t.dep_time ? ` · ${Math.round((t.dep_time - t.eta_sent) / 60)} min before you leave` : ""}`]);
   if (t.connect_from) rows.push(["Connection", `from ${esc(t.connect_from)}${t.connect_at ? ` in ${esc(t.connect_at)}` : ""}${t.connect_min != null ? ` · ${t.connect_min} min` : ""}`]);
   if (t.connect_to) rows.push(["Then", esc(t.connect_to)]);
@@ -741,7 +747,7 @@ function renderTripsBoard(d) {
     if (t.stops && t.stops.length) sub.push(`stops ${esc(t.stops.map(apt).join(", "))}`);
     const route = `<span class="only-narrow">${esc(apt(t.dep_airport) || "—")}→${esc(apt(t.arr_airport) || "?")} · </span>`;
     if (inb.tail || inb.flight) {
-      sub.push(`your plane <b>${esc(inb.tail || inb.flight)}</b>${inb.tail && inb.flight ? ` as ${esc(inb.flight)}` : ""}${inb.origin ? ` from ${esc(apt(inb.origin))}` : ""}`);
+      sub.push(`your plane <b>${esc(inb.tail || inb.flight)}</b>${inb.tail && inb.flight ? ` as ${esc(inb.flight)}` : ""}${inb.origin ? ` from ${esc(apt(inb.origin))}` : ""}${t.inbound_where && !t.landed ? ` · 📍 ${esc(t.inbound_where)}` : ""}`);
       if (t.departed && !t.landed && t.eta_sent) sub.push(`due <span class="${sc}">${fmtTime(t.eta_sent)}</span>`);
       else if (inb.arr_time) sub.push(`due ${fmtTime(inb.arr_time)}`);
     } else sub.push("plane not assigned yet");
@@ -794,33 +800,71 @@ function renderWatchersBoard(d) {
     }).join("");
     return `<div class="flap-group">${esc(w.name)} <small>${esc(w.topic)}</small>${w.planes_topic ? ` <small>✈ ${esc(w.planes_topic)}</small>` : ""}${w.priority !== "default" ? ` <span class="tag accent">${esc(w.priority)}</span>` : ""}
         <span style="margin-left:auto;display:flex;gap:12px"><button type="button" class="linkbtn" data-act="connect" data-topic="${esc(w.topic)}">connect phone</button><button type="button" class="linkbtn" data-act="add-aircraft" data-topic="${esc(w.topic)}">+ aircraft</button><button type="button" class="linkbtn" data-act="edit-watcher" data-topic="${esc(w.topic)}">edit</button></span></div>
-      ${(w.following || []).map((f) => `<div class="flap-sub">📣 following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}
-      ${rows || (w.following && w.following.length ? "" : `<div class="flap-sub">No aircraft yet. Text a tail number to <code>${esc(w.topic)}</code>.</div>`)}`;
+      ${rows || `<div class="flap-sub">No aircraft yet. Text a tail number to <code>${esc(w.topic)}</code>.</div>`}`;
   }).join("");
   $("watchers").innerHTML = `<div class="card flap-board">
     <div class="flap-head cols-fleet"><span>Aircraft</span><span>Alt</span><span>Status</span></div>${groups}</div>`;
 }
 
-/* ---------- shared trips ---------- */
-function followWhen(f) {
-  const when = f.dep_time ? `${fmtDay(f.dep_time)} ${fmtTime(f.dep_time)}` : fmtDate(f.date);
-  const state = f.landed ? " · landed" : f.departed ? " · in the air" : "";
-  return `${when}${f.dep_airport ? " from " + esc(apt(f.dep_airport)) : ""}${state}`;
+/* ---------- shared with me ---------- */
+// Trips other people shared with you: read only, with their plane's position.
+const sharedList = (d) => (d.shared || []).filter((f) => !f.landed || NOW - (f.dep_time || NOW) < 6 * 3600);
+const liveMap = (hex) => hex ? ` · <a href="https://globe.adsbexchange.com/?icao=${encodeURIComponent(hex)}" target="_blank" rel="noopener noreferrer">Live map ↗</a>` : "";
+function sharedStatus(f) {
+  if (f.landed) return ["Landed", "ground", "ARRIVED", "g"];
+  if (f.departed || f.status === "airborne") return ["In the air", "air", "IN AIR", "y"];
+  if (f.inbound_departed && !f.inbound_landed) return ["Plane on its way", "warn", "INBOUND", "o"];
+  return ["Scheduled", "unknown", "SCHED", ""];
 }
-function followingHtml(w) {
-  if (!w.following || !w.following.length) return "";
-  return `<div class="following">${w.following.map((f) => `<div>📣 Following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}</div>`;
+function sharedPlane(f) {
+  const inb = f.inbound || {}, plane = inb.tail || inb.flight;
+  if (!plane || f.departed) return "";
+  const state = f.inbound_landed ? " · at the airport" : f.inbound_departed ? (f.eta ? ` · due ${fmtTime(f.eta)}` : " · on its way")
+    : inb.arr_time ? `, due ${fmtTime(inb.arr_time)}` : "";
+  return `${esc(plane)}${inb.origin ? ` from ${esc(apt(inb.origin))}` : ""}${state}${f.inbound_where ? ` · 📍 ${esc(f.inbound_where)}` : ""}${liveMap(f.inbound_hex)}`;
 }
-
-/* ---------- shared trips ---------- */
-function followWhen(f) {
-  const when = f.dep_time ? `${fmtDay(f.dep_time)} ${fmtTime(f.dep_time)}` : fmtDate(f.date);
-  const state = f.landed ? " · landed" : f.departed ? " · in the air" : "";
-  return `${when}${f.dep_airport ? " from " + esc(apt(f.dep_airport)) : ""}${state}`;
+function sharedCard(f) {
+  const [label, cls] = sharedStatus(f);
+  const rows = [];
+  if (f.where) rows.push(["Now", `📍 ${esc(f.where)}${liveMap(f.hex)}`]);
+  if (sharedPlane(f)) rows.push(["Their plane", sharedPlane(f)]);
+  if (f.arr_time && !f.landed) rows.push(["Lands", `${fmtDay(f.arr_time)} · ${fmtTime(f.arr_time)}`]);
+  if (f.stops && f.stops.length) rows.push(["Stops", esc(f.stops.join(", "))]);
+  if (LAST.watchers.length > 1) rows.push(["Alerts to", esc(f.to_name)]);
+  return `<article class="trip">
+    <div class="t-top">
+      <span class="t-flight">${esc(f.flight)}</span>
+      <span class="t-when">${f.dep_time ? `${fmtDay(f.dep_time)} · ${fmtTime(f.dep_time)}` : fmtDate(f.date)}</span>
+      <span class="t-who">${esc(f.owner)}'s trip${f.leg === "return" ? " · return" : ""}</span>
+    </div>
+    <div class="route">
+      <div class="apt">${esc(f.dep_airport || "—")}<small>${f.dep_time && !f.departed ? "departs " + until(f.dep_time) : "departure"}</small></div>
+      <div class="line" aria-hidden="true"></div>
+      <div class="apt" style="text-align:right">${f.arr_airport ? `${esc(f.arr_airport)}<small>arrival</small>` : `<small>${esc(f.flight)}</small>`}</div>
+    </div>
+    <div><span class="chip ${cls}">${f.departed && !f.landed ? `<i class="pulse"></i>` : ""}${label}</span></div>
+    ${rows.length ? `<dl class="kv" style="margin-top:10px">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>` : ""}
+    <div class="t-actions"><button type="button" class="linkbtn" data-act="unfollow" data-id="${esc(f.id)}">Stop following</button></div>
+  </article>`;
 }
-function followingHtml(w) {
-  if (!w.following || !w.following.length) return "";
-  return `<div class="following">${w.following.map((f) => `<div>📣 Following ${esc(f.owner)}'s <b>${esc(f.flight)}</b> · ${followWhen(f)}</div>`).join("")}</div>`;
+function renderShared(d) {
+  const list = sharedList(d);
+  $("sec-shared").hidden = !list.length;
+  $("c-shared").textContent = list.length;
+  if (!list.length) { $("shared").innerHTML = ""; return; }
+  if (THEME !== "board") { $("shared").innerHTML = list.map(sharedCard).join(""); return; }
+  $("shared").innerHTML = `<div class="flap-board">
+    <div class="flap-head cols-trip"><span>Flight</span><span class="only-wide">To</span><span>Time</span><span>Status</span></div>
+    ${list.map((f) => {
+      const k = `shared:${f.id}`, [, , status, sc] = sharedStatus(f);
+      const when = f.dep_time ? (f.dep_time - NOW < 36 * 3600 ? hhmm(f.dep_time) : mmdd(f.dep_time)) : f.date.slice(5).replace("-", "/");
+      const sub = [`<span class="only-narrow">${esc(apt(f.dep_airport) || "—")}→${esc(apt(f.arr_airport) || "?")} · </span><b>${esc(f.owner)}</b>'s trip`];
+      if (f.where) sub.push(`📍 ${esc(f.where)}${liveMap(f.hex)}`);
+      if (sharedPlane(f)) sub.push("their plane " + sharedPlane(f));
+      sub.push(`<button type="button" class="linkbtn" data-act="unfollow" data-id="${esc(f.id)}">stop following</button>`);
+      return `<div class="flap-row cols-trip">${flaps(k + ":f", f.flight, 7)}<span class="only-wide">${flaps(k + ":to", apt(f.arr_airport) || "", 4)}</span>${flaps(k + ":t", when, 5)}${flaps(k + ":s", status, 9, sc)}</div>
+        <div class="flap-sub">${sub.join(" · ")}</div>`;
+    }).join("")}</div>`;
 }
 
 /* ---------- editing ---------- */
@@ -912,7 +956,7 @@ function wireLegs(form, spec) {
   add.hidden = (spec.value || []).length >= MAX_CONNECTIONS;
 }
 
-/** Open the shared form. spec: {title, fields (or [a, b] pairs), save(values), remove?/remove2?: {label, confirm, run()}} */
+/** Open the shared form. spec: {title, fields (or [a, b] pairs), save(values), remove?/remove2?: {label, confirm, run()}, after?()} */
 function openForm(spec) {
   const form = $("dlg-form");
   form.innerHTML = `<h3 id="dlg-title">${esc(spec.title)}</h3>
@@ -927,7 +971,7 @@ function openForm(spec) {
   for (const f of allFields(spec.fields)) if (f.type === "legs") wireLegs(form, f);
   const dlg = $("dlg");
   const done = async (result) => {
-    if (result.ok) { dlg.close(); toast(result.message); load(); }
+    if (result.ok) { dlg.close(); toast(result.message); await load(); if (spec.after) spec.after(); }
     else $("dlg-err").textContent = result.message;
   };
   form.onsubmit = async (e) => {
@@ -954,6 +998,9 @@ function openForm(spec) {
 }
 
 const watcherOptions = () => LAST.watchers.map((w) => [w.topic, w.name]);
+/** Everyone on this server a trip can be shared with, by watcher id (never topic). */
+const shareOptions = (t) => (LAST.people || []).filter((p) => !t || p.id !== (LAST.watchers.find((w) => w.topic === t.topic) || {}).id)
+  .map((p) => [p.id, p.person && p.person !== p.name ? `${p.name} (${p.person})` : p.name]);
 const slug = (s) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 const localDate = (t) => new Intl.DateTimeFormat("en-CA", {timeZone: TZ}).format(t * 1000);
 
@@ -995,13 +1042,13 @@ function tripForm(t, pre, intro) {
       legs("ret_", "Return connection"),
     ]}] : []),
     {name: "share", label: "Share with", type: "checks", value: t ? t.shared_with : [],
-     options: LAST.watchers.filter((w) => !t || w.topic !== t.topic).map((w) => [w.topic, w.name]),
+     options: shareOptions(t),
      hint: others.length ? `Covers every flight of this trip (${[t, ...others].map((x) => x.flight).join(", ")}). They get each flight's departure and landing, nothing else.`
        : "They get your flight's departure and landing, nothing else."},
   ];
   if (pre) for (const f of allFields(fields)) if (f.name && f.name in pre) f.value = pre[f.name];
   if (!t) return openForm({title: pre ? "Check your imported trip" : "Add trip", fields, saveLabel: "Add trip",
-    save: (v) => api("api/trip", {op: "add", ...v, share: (v.share || []).filter((x) => x !== v.topic)})});
+    save: (v) => api("api/trip", {op: "add", ...v, share: (v.share || []).filter((x) => x !== (LAST.watchers.find((w) => w.topic === v.topic) || {}).id)})});
   const before = {flight: t.flight, date: t.date, time: t.dep_time ? hhmm(t.dep_time, t.dep_tz) : "", airport: apt(t.dep_airport), to: apt(t.get_off), plane: inb.tail || inb.flight || ""};
   openForm({title: `Edit ${t.flight} · ${t.watcher}`, fields,
     save: (v) => {
@@ -1067,6 +1114,9 @@ function watcherForm(w) {
       {name: "planes", label: "Separate topic for plane alerts", type: "check", value: !!(w && w.planes_topic),
        hint: w && w.planes_topic ? `Plane alerts go to ${w.planes_topic}. Turn off to send them back to the main topic.`
          : "For plane spotters: alerts for the tail and flight numbers they watch get their own topic, so the main one is just trips. They subscribe to both (Connect phone)."},
+      {name: "timeZone", label: "Time zone", type: "select", value: w ? w.time_zone : "",
+       options: [["", `Same as the server (${LAST.settings.time_zone.replace("_", " ")})`], ...LAST.settings.time_zones],
+       hint: "For their alerts, replies and \"until fri\"."},
       ...(w ? [{name: "newTopic", label: "Give them a new topic (then reconnect their phone)", type: "check", value: false}] : []),
     ],
     save: async (v) => {
@@ -1413,6 +1463,154 @@ const radio = (name, value, current, title, hint) => `<label class="radio-card">
 const credsHtml = (logins) => logins.map((l) => `<div class="creds">${esc(l.name)} · user <b>${esc(l.username)}</b> · password <b>${esc(l.password)}</b></div>`).join("")
   + (logins.length ? `<div class="note">Shown once. In the ntfy app: Settings → Manage users → add this server with that login.</div>` : "");
 
+/* ---------- signing in ---------- */
+/** The three sign-in choices, shared by first setup and ⚙ Settings. */
+function signInChoices(current, hasAccounts) {
+  const where = docker() ? "TailWatcher's container log (or docker exec tailwatcher python /app/tailwatcher.py password)" : "StartOS → TailWatcher → Actions → Show Web UI Password";
+  return radio("webAuth", "off", current, "No sign-in", docker() ? "Anyone who can reach this page can use it. Only if its port isn't open to the internet." : "Anyone who can reach this page can use it: your home network and VPN, unless you gave it a public address.")
+    + radio("webAuth", "password", current, "One shared password", `Everyone in the household uses the same password, from ${where}.`)
+    + radio("webAuth", "accounts", current, "Family accounts", "Each person signs in with their own username and sees only their own watchers and trips. They can still share trips with each other. Admins manage people and settings, but can't see anyone else's trips.")
+    + (hasAccounts ? "" : `<div class="sub-panel" id="p-accounts" ${current === "accounts" ? "" : "hidden"}>
+        <div class="status-line">You'll be the first admin. Pick your sign-in:</div>
+        <div class="two"><label class="field">Your name<input name="adminName" autocomplete="name" placeholder="Sam"></label>
+        <label class="field">Username<input name="adminUser" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="sam"></label></div>
+        <label class="field">Password<input name="adminPassword" type="password" autocomplete="new-password" minlength="8"><small>At least 8 characters.</small></label>
+      </div>`);
+}
+function wireSignIn(form) {
+  const panel = form.querySelector("#p-accounts");
+  if (!panel) return;
+  form.querySelectorAll('input[name="webAuth"]').forEach((el) => el.addEventListener("change", () => {
+    panel.hidden = form.querySelector('input[name="webAuth"]:checked').value !== "accounts";
+  }));
+}
+const adminFields = (form) => ({name: form.elements.adminName.value.trim(), username: form.elements.adminUser.value.trim(),
+  password: form.elements.adminPassword.value});
+
+/** A new install's first visit: how will people sign in? Shown until chosen. */
+let SETUP_SHOWN = false;
+function openSetup() {
+  SETUP_SHOWN = true;
+  const form = $("dlg-form");
+  $("dlg").classList.add("wide");
+  form.innerHTML = `<h3 id="dlg-title">Welcome to TailWatcher</h3>
+    <p class="muted" style="margin:0">First, how will people use this page? You can change it later in ⚙ Settings.</p>
+    <div class="set-section">${signInChoices(docker() ? "password" : "off", false)}</div>
+    <div class="form-error" id="dlg-err" role="alert"></div>
+    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Decide later</button><button type="submit" class="btn primary">Continue</button></div>`;
+  wireSignIn(form);
+  form.oninput = () => { $("dlg-err").textContent = ""; };
+  $("dlg-cancel").onclick = () => $("dlg").close();
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const mode = form.querySelector('input[name="webAuth"]:checked').value;
+    const r = await api("api/setup", {webAuth: mode, ...(mode === "accounts" ? {admin: adminFields(form)} : {})});
+    if (!r.ok) { $("dlg-err").textContent = r.message; return; }
+    $("dlg").close(); toast(r.message); load();
+  };
+  $("dlg").addEventListener("close", () => $("dlg").classList.remove("wide"), {once: true});
+  $("dlg").showModal();
+}
+
+async function signOut(everywhere) {
+  await api("api/logout", {everywhere: !!everywhere});
+  location.href = location.pathname.replace(/[^/]*$/, "") + "login";
+}
+
+/** My account: name, time zone, password, sign out. */
+function openMe() {
+  const me = LAST.me, a = me.account, form = $("dlg-form");
+  if (!a) {
+    form.innerHTML = `<h3 id="dlg-title">Signed in</h3>
+      <p class="muted" style="margin:0">This page uses one shared password. For a login each, turn on family accounts in ⚙ Settings.</p>
+      <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Close</button><button type="button" class="btn primary" id="me-out">Sign out</button></div>`;
+  } else {
+    form.innerHTML = `<h3 id="dlg-title">My account</h3>
+      <p class="muted" style="margin:0">Signed in as <b>${esc(a.username)}</b>${me.admin ? " · admin" : ""}.</p>
+      <label class="field">Name<input name="name" value="${esc(a.name)}" autocomplete="name" maxlength="40"></label>
+      ${LAST.watchers.length ? `<label class="field">Time zone ${sel("timeZone", me.time_zone, LAST.settings.time_zones)}<small>For your alerts, text replies and this page${LAST.watchers.length > 1 ? " (all your watchers)" : ""}.</small></label>` : ""}
+      <div class="set-section"><h4>Change password</h4>
+        <label class="field">Current password<input name="current" type="password" autocomplete="current-password"></label>
+        <label class="field">New password<input name="newPassword" type="password" autocomplete="new-password" minlength="8"><small>At least 8 characters. Your other devices get signed out.</small></label>
+      </div>
+      <div class="form-error" id="dlg-err" role="alert"></div>
+      <div class="dlg-actions"><button type="button" class="btn danger" id="me-all">Sign out everywhere</button><button type="button" class="btn" id="me-out">Sign out</button><button type="button" class="btn" id="dlg-cancel">Close</button><button type="submit" class="btn primary">Save</button></div>`;
+    form.oninput = () => { $("dlg-err").textContent = ""; };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const el = form.elements, name = el.namedItem("name");
+      if (el.newPassword.value) {
+        const r = await api("api/me", {op: "password", current: el.current.value, password: el.newPassword.value});
+        if (!r.ok) { $("dlg-err").textContent = r.message; return; }
+        toast(r.message);
+      }
+      const r = await api("api/me", {op: "profile", name: name.value, ...(el.timeZone ? {timeZone: el.timeZone.value} : {})});
+      if (!r.ok) { $("dlg-err").textContent = r.message; return; }
+      $("dlg").close(); if (!el.newPassword.value) toast(r.message); load();
+    };
+    $("me-all").onclick = () => { if (confirm("Sign out on every device, this one included?")) signOut(true); };
+  }
+  $("me-out").onclick = () => signOut(false);
+  if ($("dlg-cancel")) $("dlg-cancel").onclick = () => $("dlg").close();
+  $("dlg").showModal();
+}
+
+/** People (admins, family accounts on): who can sign in and which watchers are theirs. */
+function openPeople() {
+  const form = $("dlg-form"), list = LAST.accounts || [];
+  const owners = [...list.map((a) => [a.id, a.name]), ["", "Nobody yet (admins see it)"]];
+  const watcherRow = (w, ownerId) => `<div class="person-w">${esc(w.name)}
+      <select data-move="${esc(w.id)}" aria-label="Who ${esc(w.name)} belongs to">${owners.map(([id, n]) => `<option value="${esc(id)}" ${id === ownerId ? "selected" : ""}>${esc(n)}</option>`).join("")}</select></div>`;
+  const when = (t) => t ? "signed in " + ago(t) : "hasn't signed in yet";
+  $("dlg").classList.add("wide");
+  form.innerHTML = `<h3 id="dlg-title">People</h3>
+    <p class="muted" style="margin:0">Each person signs in with their own username and sees only their own watchers and trips, plus trips shared with them. Admins also see ⚙ Settings and this page, but not other people's trips. (Whoever runs the server can still read its files.)</p>
+    ${list.map((a) => `<div class="person">
+      <div class="person-head"><b>${esc(a.name)}</b><small>${esc(a.username)} · ${a.role === "admin" ? "admin" : "member"} · ${when(a.last_login)}</small>
+        <span class="row-btns"><button type="button" class="linkbtn" data-person="${esc(a.id)}">Edit</button><button type="button" class="linkbtn" data-reset="${esc(a.id)}">Reset password</button></span></div>
+      ${a.watchers.length ? a.watchers.map((w) => watcherRow(w, a.id)).join("") : `<div class="person-w muted">No watchers</div>`}
+    </div>`).join("")}
+    ${(LAST.unassigned || []).length ? `<div class="person"><div class="person-head"><b>Not anyone's yet</b><small>Admins see these. Pick who each belongs to.</small></div>${LAST.unassigned.map((w) => watcherRow(w, "")).join("")}</div>` : ""}
+    <label class="field check"><input type="checkbox" id="pp-newtopic"> When moving a watcher, give it a new topic<small>So a phone subscribed to the old one stops getting its alerts. Reconnect their phone after.</small></label>
+    <div class="form-error" id="dlg-err" role="alert"></div>
+    <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Done</button><button type="button" class="btn primary" id="pp-add">+ Add person</button></div>`;
+  form.onsubmit = (e) => e.preventDefault();
+  $("dlg-cancel").onclick = () => $("dlg").close();
+  $("pp-add").onclick = () => personForm(null);
+  form.querySelectorAll("[data-person]").forEach((b) => b.onclick = () => personForm(list.find((a) => a.id === b.dataset.person)));
+  form.querySelectorAll("[data-reset]").forEach((b) => b.onclick = async () => {
+    const a = list.find((x) => x.id === b.dataset.reset);
+    const pw = prompt(`New temporary password for ${a.name} (at least 8 characters). They can change it under My account.`);
+    if (!pw) return;
+    const r = await api("api/accounts", {op: "password", id: a.id, password: pw});
+    if (r.ok) toast(r.message); else $("dlg-err").textContent = r.message;
+  });
+  form.querySelectorAll("[data-move]").forEach((s) => s.onchange = async () => {
+    const r = await api("api/accounts", {op: "move", watcher: s.dataset.move, id: s.value, newTopic: $("pp-newtopic").checked});
+    if (!r.ok) { $("dlg-err").textContent = r.message; return; }
+    toast(r.message); $("dlg").close(); await load(); openPeople();
+  });
+  $("dlg").addEventListener("close", () => $("dlg").classList.remove("wide"), {once: true});
+  $("dlg").showModal();
+}
+
+function personForm(a) {
+  $("dlg").close();
+  const me = LAST.me.account || {};
+  openForm({title: a ? `Edit ${a.name}` : "Add a person", saveLabel: a ? "Save" : "Add person", after: openPeople,
+    fields: [
+      ...(a ? [] : [{name: "username", label: "Username", placeholder: "mom", required: true, caps: false, hint: "Lowercase letters and numbers; what they type to sign in."}]),
+      {name: "name", label: "Name", value: a ? a.name : "", placeholder: "Mom", required: true, caps: false},
+      ...(a ? [] : [{name: "password", label: "Temporary password", type: "password", required: true, caps: false, hint: "At least 8 characters. Give it to them; they can change it under My account."}]),
+      {name: "role", label: "Role", type: "select", value: a ? a.role : "member",
+       options: [["member", "Member: their own watchers and trips"], ["admin", "Admin: also ⚙ Settings and People"]]},
+      ...(a ? [] : [{name: "watcher", label: "Make them a watcher too (their own alerts and trips)", type: "check", value: true}]),
+    ],
+    save: (v) => api("api/accounts", a ? {op: "edit", id: a.id, name: v.name, role: v.role} : {op: "add", ...v}),
+    remove: a && a.id !== me.id ? {label: "Delete account", confirm: `Delete ${a.name}'s account, their watchers and their trips? To keep a watcher, move it to someone else first.`,
+      run: () => api("api/accounts", {op: "delete", id: a.id})} : null});
+}
+
 function openSettings() {
   const s = LAST.settings, form = $("dlg-form");
   $("dlg").classList.add("wide");
@@ -1450,12 +1648,13 @@ function openSettings() {
     </div>
     <div class="set-section"><h4>Display and access</h4>
       <div class="two">
-        <label class="field">Time zone ${sel("timeZone", s.time_zone, s.time_zones)}</label>
+        <label class="field">Default time zone ${sel("timeZone", s.time_zone, s.time_zones)}</label>
         <label class="field">Map buttons ${sel("mapLinks", s.map_links, [["adsbx", "ADS-B Exchange"], ["adsblol", "adsb.lol"], ["both", "Both"]])}</label>
       </div>
       <label class="field check"><input type="checkbox" name="textCommands" ${s.text_commands ? "checked" : ""}> Text commands (people manage their list by typing in their topic)</label>
-      <label class="field check"><input type="checkbox" name="webPassword" ${s.web_password ? "checked" : ""}> Require a password for this page</label>
-      <div class="note" id="s-pw-note" ${s.web_password ? "hidden" : ""}>If you turn this on, get the password first from ${docker() ? "TailWatcher's container log, or run docker exec tailwatcher python /app/tailwatcher.py password" : "StartOS → TailWatcher → Actions → Show Web UI Password"}.</div>
+    </div>
+    <div class="set-section"><h4>Signing in to this page <button type="button" class="linkbtn help-link" data-act="help" data-section="family-accounts">? Help</button></h4>
+      ${signInChoices(s.web_auth, s.has_accounts)}
     </div>
     <div class="form-error" id="dlg-err" role="alert"></div>
     <div class="dlg-actions"><button type="button" class="btn" id="dlg-cancel">Close</button><button type="submit" class="btn primary">Save settings</button></div>`;
@@ -1489,10 +1688,17 @@ function openSettings() {
     if (f.get("aerodataboxKey")) body.aerodataboxKey = f.get("aerodataboxKey").trim();
     if (f.get("clearAerodatabox")) body.clearAerodatabox = true;
     Object.assign(body, {dataSource: f.get("dataSource"), pollSeconds: f.get("pollSeconds"), timeZone: f.get("timeZone"),
-      mapLinks: f.get("mapLinks"), textCommands: !!f.get("textCommands"), webPassword: !!f.get("webPassword")});
+      mapLinks: f.get("mapLinks"), textCommands: !!f.get("textCommands"), webAuth: f.get("webAuth")});
+    if (body.webAuth === "accounts" && !s.has_accounts) body.admin = adminFields(form);
+    if (s.web_auth === "accounts" && body.webAuth !== "accounts"
+        && !confirm("Turn off family accounts? Everyone will see every watcher and trip again. (Their accounts are kept for if you turn it back on.)")) return;
     const r = await api("api/settings", body);
-    if (r.ok) { $("dlg").close(); toast(r.message); load(); } else $("dlg-err").textContent = r.message;
+    if (!r.ok) { $("dlg-err").textContent = r.message; return; }
+    $("dlg").close(); toast(r.message);
+    if (body.webAuth !== s.web_auth) setTimeout(() => location.reload(), 1200);  // signs this browser in or out
+    else load();
   };
+  wireSignIn(form);
   $("dlg").addEventListener("close", () => $("dlg").classList.remove("wide"), {once: true});
   $("dlg").showModal();
 }
@@ -1520,6 +1726,14 @@ function onAction(btn) {
   if (act === "add-watcher") return watcherForm(null);
   if (act === "connect" && w) return connectPhone(w);
   if (act === "settings") return openSettings();
+  if (act === "me") return openMe();
+  if (act === "people") return openPeople();
+  if (act === "unfollow") {
+    const f = (LAST.shared || []).find((x) => x.id === btn.dataset.id);
+    if (f && confirm(`Stop getting alerts for ${f.owner}'s ${f.flight}? ${f.owner} gets a note, and can share it with you again.`))
+      api("api/unfollow", {id: f.id}).then((r) => { toast(r.message); load(); });
+    return;
+  }
   if (act === "edit-watcher" && w) return watcherForm(w);
   if (act === "add-aircraft" && w) return aircraftForm(w, null);
   if (act === "edit-aircraft" && w) return aircraftForm(w, w.aircraft.find((a) => a.ident === ident));
@@ -1541,8 +1755,14 @@ function render(d) {
   $("statusText").textContent = d.health.message || (d.health.ok ? "Watching" : "Needs attention");
   renderStats(d);
   if (THEME === "board") { renderTripsBoard(d); renderWatchersBoard(d); } else { renderTrips(d); renderWatchers(d); }
-  renderFeed(d); renderSystem(d);
-  $("foot").innerHTML = `TailWatcher ${esc(d.version)} · times in ${esc(d.time_zone.replace("_", " "))} · updates every 20 s · <button type="button" class="linkbtn" data-act="help">Help</button>`;
+  renderShared(d); renderFeed(d); renderSystem(d);
+  const me = d.me, signedIn = me.mode !== "off";
+  $("btn-settings").hidden = !me.admin;
+  $("btn-people").hidden = !(me.admin && me.mode === "accounts");
+  $("btn-me").hidden = !signedIn;
+  $("me-label").textContent = " " + (me.account ? me.account.name : "Sign out");
+  $("foot").innerHTML = `TailWatcher ${esc(d.version)}${me.account ? ` · signed in as ${esc(me.account.username)}` : ""} · times in ${esc(d.time_zone.replace("_", " "))} · updates every 20 s · <button type="button" class="linkbtn" data-act="help">Help</button>`;
+  if (me.setup && me.admin && !SETUP_SHOWN && !$("dlg").open && !$("help").open) openSetup();
 }
 
 async function load() {
@@ -1551,6 +1771,7 @@ async function load() {
     // otherwise hand its credentials to fetch(), which refuses them.
     const url = location.origin + location.pathname.replace(/[^/]*$/, "") + "api/state";
     const r = await fetch(url, {cache: "no-store", credentials: "same-origin"});
+    if (r.status === 401) { location.href = location.pathname.replace(/[^/]*$/, "") + "login"; return; }  // signed out
     if (!r.ok) throw new Error("HTTP " + r.status);
     render(await r.json());
   } catch (err) {

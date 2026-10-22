@@ -56,11 +56,13 @@ def _uses(w, topic):
 
 
 def save_watcher(path, original, name, topic, priority="default", notify_landing=False, trips_path=None,
-                 new_topic_requested=False, planes=None):
+                 new_topic_requested=False, planes=None, time_zone=None, result=None):
     """Add a watcher (original=None) or update the one whose topic is `original`.
     A blank topic gets a new unguessable one (new watchers) or stays as it was.
     planes: True gives them a separate Planes topic (kept if they have one),
-    False puts plane alerts back in the main topic, None leaves it as it is."""
+    False puts plane alerts back in the main topic, None leaves it as it is.
+    time_zone: theirs ("" = the server's), None leaves it. The saved topic
+    goes in result["topic"]."""
     name, topic = (name or "").strip()[:40], (topic or "").strip()
     if not name:
         raise EditError("Give the watcher a name.")
@@ -70,6 +72,8 @@ def save_watcher(path, original, name, topic, priority="default", notify_landing
         raise EditError("The topic can only use letters, numbers, underscores and hyphens.")
     if priority not in PRIORITIES:
         raise EditError("Pick a priority: low, default, high or max.")
+    if time_zone not in (None, "") and time_zone not in TIME_ZONES:
+        raise EditError("Pick a time zone from the list.")
     with commands.CONFIG_LOCK:
         raw = commands.read_raw(path)
         watchers = raw.setdefault("watchers", [])
@@ -88,18 +92,39 @@ def save_watcher(path, original, name, topic, priority="default", notify_landing
         if planes is not None:
             keep = current.get("planesTopic") if current.get("planesTopic") != topic else ""
             current["planesTopic"] = (keep or new_topic(name, "planes")) if planes else ""
+        if time_zone is not None:
+            current["timeZone"] = time_zone
         commands.write_raw(path, raw)
     if original and original != topic:
         rename_trip_topic(original, topic, trips_path)
+    if result is not None:
+        result["topic"] = topic
     return f"Saved {name}." if original else f"Added {name}."
 
 
+def set_time_zone(path, topics, time_zone):
+    """Set several watchers' time zone at once (an account's "My time zone")."""
+    if time_zone and time_zone not in TIME_ZONES:
+        raise EditError("Pick a time zone from the list.")
+    with commands.CONFIG_LOCK:
+        raw = commands.read_raw(path)
+        for w in raw.get("watchers") or []:
+            if w.get("topic") in topics:
+                w["timeZone"] = time_zone
+        commands.write_raw(path, raw)
+
+
 def rename_trip_topic(old, new, path=None):
+    """A watcher's topic changed: move their trips, and the trips other
+    people shared with them."""
     with trips.TRIPS_LOCK:
         all_trips = trips.load(path)
-        changed = [t for t in all_trips if t.get("topic") == old]
-        for t in changed:
-            t["topic"] = new
+        changed = False
+        for t in all_trips:
+            if t.get("topic") == old:
+                t["topic"], changed = new, True
+            if old in (t.get("shared_with") or []):
+                t["shared_with"], changed = [new if x == old else x for x in t["shared_with"]], True
         if changed:
             trips.save(all_trips, path)
 
@@ -223,7 +248,10 @@ def save_settings(path, data):
         if not 15 <= secs <= 600:
             raise EditError("Check every must be between 15 and 600 seconds.")
         changes["pollSeconds"] = secs
-    for key in ("textCommands", "webPassword"):
+    if "webAuth" in data:
+        changes["webAuth"] = choice("webAuth", ("off", "password", "accounts"))
+        changes["webPassword"] = changes["webAuth"] != "off"  # what 0.21 and older read
+    for key in ("textCommands",):
         if key in data:
             changes[key] = bool(data[key])
     with commands.CONFIG_LOCK:

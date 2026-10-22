@@ -1,7 +1,7 @@
 import { FileHelper, utils, z } from '@start9labs/start-sdk'
 import { sdk } from '../sdk'
 
-/** The Web UI password, read by app/web.py (HTTP Basic auth, any username). */
+/** The Web UI password, read by app/web.py: the shared password, or a reset for the first family-accounts admin. */
 export const webuiJson = FileHelper.json(
   { base: sdk.volumes.main, subpath: 'webui.json' },
   z.object({ password: z.string().catch('') }),

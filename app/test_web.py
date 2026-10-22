@@ -1,11 +1,14 @@
 import base64
+import http.client
 import json
 import os
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 
+import accounts
 import history
 import web
 
@@ -20,26 +23,48 @@ class WebServerTest(unittest.TestCase):
     def setUpClass(cls):
         cls.dir = tempfile.mkdtemp()
         cls.pw = os.path.join(cls.dir, "webui.json")
+        cls.acc = os.path.join(cls.dir, "accounts.json")
+        cls.ses = os.path.join(cls.dir, "sessions.json")
         with open(os.path.join(cls.dir, "index.html"), "w") as f:
             f.write("<title>TailWatcher</title>")
-        cls.required = False
-        cls.srv = web.serve(0, Health(), lambda: {"watchers": [], "secret": False},
-                            password_path=cls.pw, web_dir=cls.dir, require_password=lambda: cls.required)
-        cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
+        cls.mode = "off"
+        cls.seen = []
+        cls.srv = web.serve(0, Health(), lambda v: cls.seen.append(v) or {"watchers": [], "secret": False},
+                            password_path=cls.pw, web_dir=cls.dir, mode=lambda: cls.mode,
+                            post=lambda path, data, v: (200, {"ok": True, "who": (v["account"] or {}).get("username")}),
+                            accounts_path=cls.acc, sessions_path=cls.ses)
+        cls.port = cls.srv.server_address[1]
 
     @classmethod
     def tearDownClass(cls):
         cls.srv.shutdown()
 
-    def get(self, path, password=None):
-        req = urllib.request.Request(self.base + path)
+    def setUp(self):
+        type(self).mode = "password"
+        web.THROTTLE.fails.clear()
+
+    def request(self, method, path, body=None, headers=None):
+        """One request, redirects not followed: (status, body, headers)."""
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request(method, path, body=body, headers=headers or {})
+        r = conn.getresponse()
+        out = r.status, r.read().decode(), dict(r.getheaders())
+        conn.close()
+        return out
+
+    def get(self, path, password=None, cookie=None):
+        headers = {}
         if password is not None:
-            req.add_header("Authorization", "Basic " + base64.b64encode(f"any:{password}".encode()).decode())
-        try:
-            with urllib.request.urlopen(req, timeout=5) as r:
-                return r.status, r.read().decode(), dict(r.headers)
-        except urllib.error.HTTPError as e:
-            return e.code, e.read().decode(), dict(e.headers)
+            headers["Authorization"] = "Basic " + base64.b64encode(f"any:{password}".encode()).decode()
+        if cookie:
+            headers["Cookie"] = cookie
+        return self.request("GET", path, headers=headers)
+
+    def login(self, password, username=""):
+        body = urllib.parse.urlencode({"username": username, "password": password})
+        code, page, headers = self.request("POST", "/login", body, {"Content-Type": "application/x-www-form-urlencoded"})
+        cookie = (headers.get("Set-Cookie") or "").split(";")[0]
+        return code, page, cookie
 
     def set_password(self, pw):
         with open(self.pw, "w") as f:
@@ -50,34 +75,97 @@ class WebServerTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(json.loads(body)["message"], "Watching 1 aircraft")
 
-    def setUp(self):
-        type(self).required = True
-
-    def test_open_by_default(self):
-        type(self).required = False
+    def test_open_when_sign_in_is_off(self):
+        type(self).mode = "off"
         self.set_password("correct-horse")
         code, body, _ = self.get("/api/state")
         self.assertEqual((code, json.loads(body)), (200, {"watchers": [], "secret": False}))
         self.assertEqual(self.get("/")[0], 200)
+        self.assertEqual(self.get("/login")[2].get("Location"), "./")
 
     def test_no_password_file_locks_everything(self):
         if os.path.exists(self.pw):
             os.unlink(self.pw)
         self.assertEqual(self.get("/", "x")[0], 503)
 
-    def test_password_required(self):
+    def test_shared_password(self):
         self.set_password("correct-horse")
         code, _, headers = self.get("/")
-        self.assertEqual(code, 401)
-        self.assertIn("Basic", headers.get("WWW-Authenticate", ""))
+        self.assertEqual((code, headers.get("Location")), (303, "login"))  # the sign-in form, not a browser prompt
+        self.assertNotIn("WWW-Authenticate", headers)
+        code, body, _ = self.get("/login")
+        self.assertIn("Sign in", body)
+        self.assertNotIn('name="username" value=""' + ' autocomplete', body)
+        self.assertEqual(self.get("/api/state")[0], 401)
         self.assertEqual(self.get("/api/state", "wrong")[0], 401)
-        code, body, headers = self.get("/api/state", "correct-horse")
+        code, body, headers = self.get("/api/state", "correct-horse")  # scripts may still use Basic auth
         self.assertEqual((code, json.loads(body)), (200, {"watchers": [], "secret": False}))
         self.assertEqual(headers.get("Cache-Control"), "no-store")
-        code, body, _ = self.get("/", "correct-horse")
+        self.assertEqual(self.login("wrong")[0], 401)
+        code, _, cookie = self.login("correct-horse")
+        self.assertEqual(code, 303)
+        self.assertTrue(cookie.startswith("tw_session="))
+        self.assertEqual(self.get("/", cookie=cookie)[0], 200)
+        self.assertEqual(self.get("/../../etc/passwd", cookie=cookie)[0], 404)
+        self.set_password("new-password")  # reset in StartOS Actions: old sessions stop working
+        self.assertEqual(self.get("/api/state", cookie=cookie)[0], 401)
+
+    def test_cookie_flags(self):
+        self.set_password("correct-horse")
+        body = urllib.parse.urlencode({"password": "correct-horse"})
+        _, _, headers = self.request("POST", "/login", body, {"Content-Type": "application/x-www-form-urlencoded",
+                                                              "X-Forwarded-Proto": "https"})
+        flags = headers["Set-Cookie"]
+        for flag in ("HttpOnly", "SameSite=Lax", "Secure", "Path=/"):
+            self.assertIn(flag, flags)
+        _, _, headers = self.request("POST", "/login", body, {"Content-Type": "application/x-www-form-urlencoded"})
+        self.assertNotIn("Secure", headers["Set-Cookie"])  # plain http (LAN, Tor): a Secure cookie would be dropped
+
+    def test_login_from_another_site_is_refused(self):
+        self.set_password("correct-horse")
+        body = urllib.parse.urlencode({"password": "correct-horse"})
+        code, _, _ = self.request("POST", "/login", body, {"Content-Type": "application/x-www-form-urlencoded",
+                                                           "Origin": "https://evil.example"})
+        self.assertEqual(code, 403)
+
+    def test_guessing_is_slowed(self):
+        self.set_password("correct-horse")
+        for _ in range(5):
+            self.assertEqual(self.login("guess")[0], 401)
+        code, page, _ = self.login("correct-horse")
+        self.assertEqual(code, 429)
+        self.assertIn("Too many tries", page)
+
+    def test_family_accounts(self):
+        type(self).mode = "accounts"
+        for p in (self.acc, self.ses):
+            if os.path.exists(p):
+                os.unlink(p)
+        accounts.create("mom", "Mom", "mom-password", "admin", ["tw-mom"], self.acc)
+        accounts.create("kid", "Kid", "kid-password", "member", ["tw-kid"], self.acc)
+        self.assertIn('name="username"', self.get("/login")[1])
+        self.assertEqual(self.login("kid-password", "mom")[0], 401)
+        code, _, cookie = self.login("kid-password", "Kid")  # usernames ignore case
+        self.assertEqual(code, 303)
+        self.assertEqual(self.get("/api/state", cookie=cookie)[0], 200)
+        self.assertEqual(self.seen[-1]["account"]["username"], "kid")
+        self.assertFalse(self.seen[-1]["admin"])
+        self.assertNotIn("hash", self.seen[-1]["account"])
+        post = lambda path, cookie: self.request(  # noqa: E731
+            "POST", path, "{}", {"Content-Type": "application/json", "X-TailWatcher": "1", "Cookie": cookie})
+        code, body, _ = post("/api/trip", cookie)
+        self.assertEqual(json.loads(body)["who"], "kid")
+        code, _, headers = post("/api/logout", cookie)
         self.assertEqual(code, 200)
-        self.assertIn("TailWatcher", body)
-        self.assertEqual(self.get("/../../etc/passwd", "correct-horse")[0], 404)
+        self.assertIn("Max-Age=0", headers["Set-Cookie"])
+        self.assertEqual(self.get("/api/state", cookie=cookie)[0], 401)
+        _, _, cookie = self.login("mom-password", "mom")
+        self.get("/api/state", cookie=cookie)
+        self.assertTrue(self.seen[-1]["admin"])
+        accounts.update(self.seen[-1]["account"]["id"], password="another-password", path=self.acc)
+        # (update() signs out the default sessions file; the server here uses its own)
+        accounts.end_for(self.seen[-1]["account"]["id"], self.ses)
+        self.assertEqual(self.get("/api/state", cookie=cookie)[0], 401)
 
 
 class PageTest(unittest.TestCase):
@@ -138,7 +226,7 @@ class HistoryTest(unittest.TestCase):
 class PostSizeTest(unittest.TestCase):
     def test_only_import_takes_a_whole_email(self):
         srv = web.serve(0, Health(), lambda: {}, password_path="/nonexistent", web_dir=tempfile.mkdtemp(),
-                        post=lambda path, data: (200, {"ok": True, "size": len(data.get("text", ""))}))
+                        post=lambda path, data, v: (200, {"ok": True, "size": len(data.get("text", ""))}))
         try:
             body = json.dumps({"text": "x" * 300_000}).encode()
             for path, want in (("/api/import", 200), ("/api/trip", 400)):

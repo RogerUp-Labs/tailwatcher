@@ -14,7 +14,7 @@ const configureTask = sdk.setupOnInit(async (effects, kind) => {
   if ((await configJson.read().once())?.watchers.length) return
   await sdk.action.createOwnTask(effects, configure, 'important', {
     reason:
-      'Add a watcher for each person (easiest from the Web UI), then use "Connect phone" to link their ntfy app.',
+      'Open the Web UI: choose how people sign in (no sign-in, a shared password, or family accounts), add a watcher for each person, then use "Connect phone" to link their ntfy app.',
   })
 })
 
