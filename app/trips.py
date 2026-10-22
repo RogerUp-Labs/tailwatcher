@@ -56,8 +56,11 @@ ADB_HOST = "aerodatabox.p.rapidapi.com"
 ADSBDB_ROUTE_URL = "https://api.adsbdb.com/v0/callsign/{cs}"
 
 # With an AeroDataBox key: full checks (2 requests) this many hours before
-# departure; before that, light checks (1 request) weekly, then daily. See check_level().
+# departure; before that, light checks (1 request) weekly, then daily from
+# DAILY_DAYS out. See check_level().
 CHECKPOINT_HOURS = [24, 6, 2, 0.75]
+DAILY_DAYS = 3
+REMINDER_DAYS = (0, 1, 2, 3, 7)  # a watcher's tripReminder choices; 0 = off
 APPROACH_MIN = 8        # added to distance/groundspeed for the approach and landing
 TIGHT_MIN = 45          # warn when the inbound plane lands this close to your departure
 LATE_MIN = 20           # ...and again at this, as a likely delay
@@ -355,7 +358,7 @@ def apply_change(trip, text, now, tz_name, airports):
             old = datetime.datetime.fromtimestamp(trip["dep_time"], commands.zone(zone))
             trip["dep_time"], _ = departure_time(f["day"], (old.hour, old.minute), True, now, zone)
         trip.update(seen=False, missing=False, replacement=None,
-                    checkpoints=list(CHECKPOINT_HOURS), last_check=None)
+                    checkpoints=list(CHECKPOINT_HOURS), last_check=None, adb_wait=None, reminded=False)
         if not trip.get("plane_locked"):
             trip["inbound"] = None
     if f["clock"]:
@@ -769,7 +772,49 @@ def describe_all(trips, tz_name):
 
 
 class AdbError(Exception):
-    pass
+    """`wait`: seconds before the trip checker tries that trip again."""
+    def __init__(self, message, wait=1800):
+        super().__init__(message)
+        self.wait = wait
+
+
+USAGE_PATH = os.environ.get("TW_ADB_USAGE", "/data/aerodatabox.json")
+RATELIMIT_RE = re.compile(r"^x-ratelimit-([a-z0-9-]+?)-(limit|remaining|reset)$")
+
+
+def record_usage(headers, now=None, path=None):
+    """Keep RapidAPI's quota headers (x-ratelimit-requests-remaining, and the
+    units the free plan is really metered in) for ⚙ Settings. Best effort."""
+    now = now or time.time()
+    usage = {}
+    for name, value in headers.items():
+        m = RATELIMIT_RE.match(name.lower())
+        if m and value.strip().isdigit():
+            usage.setdefault(m.group(1), {})[m.group(2)] = int(value)
+    usage = {k: v for k, v in usage.items() if "remaining" in v}
+    if not usage:
+        return
+    for v in usage.values():
+        if "reset" in v:
+            v["reset"] = now + v["reset"]  # RapidAPI sends seconds until the monthly reset
+    try:
+        tmp = (path or USAGE_PATH) + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"at": now, "quotas": usage}, f)
+        os.replace(tmp, path or USAGE_PATH)
+    except OSError:
+        pass
+    log.info("AeroDataBox: %s left this month", ", ".join(
+        f"{v['remaining']} {k}" for k, v in usage.items()))
+
+
+def load_usage(path=None):
+    """What record_usage() last saw, or None."""
+    try:
+        with open(path or USAGE_PATH) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
 def adb_get(key, path, params, ua, timeout=20):
@@ -778,16 +823,15 @@ def adb_get(key, path, params, ua, timeout=20):
         "X-RapidAPI-Key": key, "X-RapidAPI-Host": ADB_HOST, "User-Agent": ua})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            remaining = r.headers.get("x-ratelimit-requests-remaining")
-            if remaining is not None:
-                log.info("AeroDataBox: %s requests left this month", remaining)
+            record_usage(r.headers)
             body = r.read()
             return json.loads(body) if r.status != 204 and body.strip() else []
     except urllib.error.HTTPError as e:
+        record_usage(e.headers or {})
         if e.code in (401, 403):
-            raise AdbError("AeroDataBox rejected the API key (check it in Settings)") from e
+            raise AdbError("AeroDataBox rejected the API key (check it in Settings)", 6 * 3600) from e
         if e.code == 429:
-            raise AdbError("AeroDataBox quota or rate limit reached") from e
+            raise AdbError("AeroDataBox quota or rate limit reached", 3600) from e
         raise AdbError(f"AeroDataBox error HTTP {e.code}") from e
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise AdbError(f"AeroDataBox unreachable: {e}") from e
@@ -960,12 +1004,13 @@ def find_replacement(trip, key, ua, get=adb_get):
 def check_level(trip, now):
     """What AeroDataBox check is due: None, "light" or "full".
 
-    More than 2 weeks out: a light check weekly (is the flight still listed?).
+    More than 3 days out: a light check weekly (is the flight still listed?).
     From then until a day out: a light check daily. In the last day: full
     checks about 24h, 6h, 2h and 45 min before departure (the plane is
     usually only assigned then). Consumes the checkpoints it reports.
+    Nothing while a failed check waits to retry (`adb_wait`).
     """
-    if trip.get("source") != "aerodatabox" or trip.get("landed"):
+    if trip.get("source") != "aerodatabox" or trip.get("landed") or now < (trip.get("adb_wait") or 0):
         return None
     dep = trip.get("dep_time")
     if dep and now >= dep - 24 * 3600:
@@ -975,7 +1020,7 @@ def check_level(trip, now):
         trip["checkpoints"] = [h for h in trip["checkpoints"] if h not in passed]
         return "full"
     ahead = (dep or date_end(trip)) - now
-    interval = 7 * 86400 if ahead > 14 * 86400 else 86400
+    interval = 7 * 86400 if ahead > DAILY_DAYS * 86400 else 86400
     last = trip.get("last_check")
     return "light" if not last or now - last >= interval else None
 
@@ -984,13 +1029,46 @@ def next_check_time(trip, now):
     """When check_level() will next ask for an AeroDataBox check (for display)."""
     if trip.get("source") != "aerodatabox" or trip.get("landed"):
         return None
+    wait = trip.get("adb_wait") or 0
     dep = trip.get("dep_time")
     if dep and now >= dep - 25 * 3600:
         upcoming = [dep - h * 3600 for h in trip.get("checkpoints") or [] if dep - h * 3600 > now]
-        return min(upcoming) if upcoming else None
+        return max(min(upcoming), wait) if upcoming else None
     ahead = (dep or date_end(trip)) - now
-    interval = 7 * 86400 if ahead > 14 * 86400 else 86400
-    return max(now, (trip.get("last_check") or now) + interval) if trip.get("last_check") else now
+    interval = 7 * 86400 if ahead > DAILY_DAYS * 86400 else 86400
+    if trip.get("last_check"):
+        # a weekly check never lands past the start of the daily ones
+        due = min(trip["last_check"] + interval, (dep or date_end(trip)) - DAILY_DAYS * 86400)
+        return max(now, due, wait)
+    return max(now, wait)
+
+
+REMINDER_WINDOW_H = 6  # a reminder that's this late (TailWatcher was off) is skipped
+
+
+def reminder_due(trip, days, now):
+    """A watcher's trip reminder (tripReminder: days before departure, 0 = off)
+    is due for this flight. Once per flight, only for flights you start from
+    (not a connection), and not for a trip added after the reminder time."""
+    dep = trip.get("dep_time")
+    if not days or not dep or trip.get("reminded") or trip.get("landed"):
+        return False
+    at = dep - days * 86400
+    return trip.get("created", 0) < at <= now < at + REMINDER_WINDOW_H * 3600
+
+
+def reminder_message(trip, days, tz_name, then=()):
+    """(title, message, priority) for reminder_due(). then: its connections, in order."""
+    when = "tomorrow" if days == 1 else "in a week" if days == 7 else f"in {days} days"
+    lines = [describe(trip, tz_name, intro=False)]
+    for c in then:
+        line = f"🔗 Then {c['flight']}"
+        if c.get("dep_time"):
+            line += f", departs {fmt_time(c['dep_time'], tz_name)}"
+        if c.get("dep_airport"):
+            line += f" from {c['dep_airport']}"
+        lines.append(line)
+    return f"🧳 {trip['flight']} {when}", "\n".join(lines), 3
 
 
 def change_messages(trip, notes, tz_name, number=None):

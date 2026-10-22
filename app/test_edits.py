@@ -48,6 +48,14 @@ class EditsTest(unittest.TestCase):
         edits.save_watcher(self.cfg, topic, "Parents", topic, new_topic_requested=True)
         self.assertRegex(self.read()["watchers"][1]["topic"], r"^tw-parents-[a-z2-9]{20}$")
 
+    def test_trip_reminder(self):
+        edits.save_watcher(self.cfg, "tailwatcher_sam", "Sam", "", reminder="3")   # form selects send text
+        self.assertEqual(self.read()["watchers"][0]["tripReminder"], 3)
+        edits.save_watcher(self.cfg, "tailwatcher_sam", "Sam", "")                 # None leaves it
+        self.assertEqual(self.read()["watchers"][0]["tripReminder"], 3)
+        with self.assertRaises(edits.EditError):
+            edits.save_watcher(self.cfg, "tailwatcher_sam", "Sam", "", reminder=5)
+
     def test_planes_topic(self):
         edits.save_watcher(self.cfg, "tailwatcher_sam", "Sam", "", planes=True)
         planes = self.read()["watchers"][0]["planesTopic"]

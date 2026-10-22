@@ -161,14 +161,66 @@ class ResolveTest(unittest.TestCase):
         trip["last_check"] = NOON
         self.assertIsNone(trips.check_level(trip, NOON + 3 * 86400))
         self.assertEqual(trips.check_level(trip, NOON + 7 * 86400), "light")   # weekly
-        trip["last_check"] = ts(2026, 11, 14, 12)                     # 10 days out: daily
-        self.assertIsNone(trips.check_level(trip, ts(2026, 11, 14, 20)))
-        self.assertEqual(trips.check_level(trip, ts(2026, 11, 15, 13)), "light")
+        trip["last_check"] = ts(2026, 11, 14, 12)                     # 10 days out: still weekly
+        self.assertIsNone(trips.check_level(trip, ts(2026, 11, 15, 13)))
+        self.assertEqual(trips.check_level(trip, ts(2026, 11, 21, 13)), "light")
+        trip["last_check"] = ts(2026, 11, 21, 13)                     # last 3 days: daily
+        self.assertIsNone(trips.check_level(trip, ts(2026, 11, 21, 20)))
+        self.assertEqual(trips.check_level(trip, ts(2026, 11, 22, 14)), "light")
         # Last day: full checks at 24h, 6h, 2h and 45 min, each once.
         self.assertEqual(trips.check_level(trip, ts(2026, 11, 23, 16, 30)), "full")
         self.assertIsNone(trips.check_level(trip, ts(2026, 11, 23, 20)))
         self.assertEqual(trips.check_level(trip, ts(2026, 11, 24, 10, 30)), "full")
         self.assertEqual(trip["checkpoints"], [2, 0.75])
+
+    def test_weekly_check_moves_up_to_the_daily_ones(self):
+        trip = trips.parse_inbound("AA1234 11/24", NOON, TZ, AIR)
+        trip["dep_time"] = ts(2026, 11, 24, 16)
+        trip["last_check"] = ts(2026, 11, 17, 16)                     # 7 days out
+        self.assertEqual(trips.next_check_time(trip, ts(2026, 11, 18, 0)), ts(2026, 11, 21, 16))
+
+    def test_failed_check_waits_before_retrying(self):
+        trip = trips.parse_inbound("AA1234 11/24", NOON, TZ, AIR)
+        trip["dep_time"] = ts(2026, 11, 24, 16)
+        trip["adb_wait"] = NOON + 3600
+        self.assertIsNone(trips.check_level(trip, NOON + 60))
+        self.assertEqual(trips.next_check_time(trip, NOON + 60), NOON + 3600)
+        self.assertEqual(trips.check_level(trip, NOON + 3601), "light")
+        trip["dep_time"] = NOON + 3 * 3600                            # waiting keeps the checkpoints
+        trip["adb_wait"] = NOON + 3600
+        self.assertIsNone(trips.check_level(trip, NOON + 60))
+        self.assertEqual(trip["checkpoints"], trips.CHECKPOINT_HOURS)
+
+    def test_reminder(self):
+        trip = trips.parse_inbound("UA1234 N38473 11/14 dep 4:30pm", NOON, TZ, AIR)
+        dep = trip["dep_time"]
+        self.assertFalse(trips.reminder_due(trip, 0, dep - 3 * 86400))           # off
+        self.assertFalse(trips.reminder_due(trip, 3, dep - 3 * 86400 - 60))      # not yet
+        self.assertTrue(trips.reminder_due(trip, 3, dep - 3 * 86400 + 60))
+        self.assertFalse(trips.reminder_due(trip, 3, dep - 2 * 86400))           # too late: TailWatcher was off
+        trip["reminded"] = True
+        self.assertFalse(trips.reminder_due(trip, 3, dep - 3 * 86400 + 60))
+        late = trips.parse_inbound("UA1234 N38473 11/14 dep 4:30pm", dep - 3 * 86400 + 30, TZ, AIR)
+        self.assertFalse(trips.reminder_due(late, 3, dep - 3 * 86400 + 60))      # added after it was due
+        conn = {"flight": "UA567", "dep_time": dep + 3 * 3600, "dep_airport": "KDEN"}
+        title, message, _ = trips.reminder_message(trip, 1, TZ, [conn])
+        self.assertEqual(title, "🧳 UA1234 tomorrow")
+        self.assertIn("4:30pm", message)
+        self.assertIn("N38473", message)
+        self.assertIn("🔗 Then UA567, departs 7:30pm from KDEN", message)
+        self.assertEqual(trips.reminder_message(trip, 3, TZ)[0], "🧳 UA1234 in 3 days")
+
+    def test_usage_headers(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "usage.json")
+            trips.record_usage({"Content-Type": "application/json"}, NOON, path)
+            self.assertIsNone(trips.load_usage(path))
+            trips.record_usage({"X-RateLimit-Requests-Limit": "1600", "X-RateLimit-Requests-Remaining": "1540",
+                                "X-RateLimit-Requests-Reset": "86400", "X-RateLimit-Units-Limit": "400",
+                                "X-RateLimit-Units-Remaining": "312"}, NOON, path)
+            self.assertEqual(trips.load_usage(path), {"at": NOON, "quotas": {
+                "requests": {"limit": 1600, "remaining": 1540, "reset": NOON + 86400},
+                "units": {"limit": 400, "remaining": 312}}})
 
     def test_light_check_skips_the_plane_lookup(self):
         trip = trips.parse_inbound("UA1234", NOON, TZ, AIR)

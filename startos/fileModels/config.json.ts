@@ -45,6 +45,8 @@ const watcher = z.object({
   priority: priority.catch('default'),
   /** Their own time zone (0.22.0); blank = the server's `timeZone`. Set in the Web UI. */
   timeZone: z.string().catch(''),
+  /** Days before each flight to send a trip reminder (0.24.0); 0 = off. Set in the Web UI. */
+  tripReminder: z.number().catch(0),
 })
 
 /**
