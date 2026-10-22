@@ -55,26 +55,26 @@ Plane spotters can give these alerts their own topic, so the main topic carries 
 
 ## Text commands
 
-People can manage their own list by typing in their topic in the ntfy app (the message bar at the bottom). TailWatcher replies in the same conversation.
+People can manage their own trips and watch list by typing in their topic in the ntfy app (the message bar at the bottom). TailWatcher replies in the same conversation. `help` sends the same list, trip commands first.
 
 | Send | Does |
 |---|---|
+| `inbound UA1234 N38473 dep 4:30pm` | Follow the plane flying in for your flight |
+| `inbound UA1234 11/14 return UA5678 11/21` | A round trip: your flight out and your flight home together |
+| `inbound UA1234 then UA567` | A connecting flight: I'll tell you how long you'll have to make it |
+| `trips` | Your trips, numbered |
+| `change 1 AA5678` | Update trip 1: a new flight number, `dep 5:10pm`, a plane, a date `11/15`, `from DFW` or `to DEN` |
+| `return 1 UA5678 11/21` | Add the flight home to trip 1 |
+| `connect 1 UA567` | Add a connecting flight after trip 1 |
+| `cancel 1` | Stop tracking trip 1 (and its connections and return; `cancel 1 only` for just that flight) |
+| `share 1 Mom & Dad` | Send another watcher your flight's departure and landing (`unshare` to stop). Covers every flight of the trip |
 | `N12345` | Watch tail number N12345 |
 | `UA1234` (or `DL 89`) | Watch a flight number |
 | `add N12345 Vegas trip` | Watch it with a nickname (or rename one you already watch) |
 | `UA1234 for 2 days` | Watch it, then stop automatically. Also `3d`, `12h`, `until fri`, `until tomorrow` |
 | `remove N12345` | Stop watching |
-| `list` | Your list, what's airborne, and time left on expiring entries |
 | `info N12345` | Look up any aircraft: what it is, who owns it, where it is now |
-| `inbound UA1234 N38473 dep 4:30pm` | Follow the plane flying in for your flight |
-| `inbound UA1234 11/14 return UA5678 11/21` | A round trip: your flight out and your flight home together |
-| `inbound UA1234 then UA567` | A connecting flight: I'll tell you how long you'll have to make it |
-| `return 1 UA5678 11/21` | Add the flight home to trip 1 |
-| `connect 1 UA567` | Add a connecting flight after trip 1 |
-| `trips` | Your trips, numbered |
-| `change 1 AA5678` | Update trip 1: a new flight number, `dep 5:10pm`, a plane, a date `11/15`, `from DFW` or `to DEN` |
-| `share 1 Mom & Dad` | Send another watcher your flight's departure and landing (`unshare` to stop). Covers every flight of the trip |
-| `cancel 1` | Stop tracking trip 1 (and its connections and return; `cancel 1 only` for just that flight) |
+| `list` | Your trips and watch list, what's airborne, and time left on expiring entries |
 | `help` | Show the commands |
 
 A plane you add is checked right away; if it's already flying, the "airborne" alert arrives within seconds. Entries with an end date remove themselves ("⌛ Stopped watching UA1234"). Each person can only change their own list. Text commands can be turned off in **⚙ Settings**.
