@@ -21,6 +21,13 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(c.parse("List")[0], "list")
         self.assertEqual(c.parse("help")[0], "help")
 
+    def test_help_puts_trips_first_and_every_example_parses(self):
+        self.assertLess(c.HELP.index("YOUR TRIPS"), c.HELP.index("WATCH A PLANE"))
+        for line in c.HELP.splitlines():
+            if line.startswith("• "):
+                example = line[2:].split(" — ")[0].split(" or ")[0]
+                self.assertNotEqual(c.parse(example)[0], "unknown", example)
+
     def test_chatter_is_not_a_tail(self):
         self.assertEqual(c.parse("hello there")[0], "unknown")
         self.assertEqual(c.parse("")[0], "unknown")
