@@ -8,7 +8,12 @@ Setup: (1) check the admin login, (2) create (or reset) the "tailwatcher"
 user, (3) give it Read-Write on tw-* (and tailwatcher* for pre-0.12 topics), (4) phones: "open" grants anonymous
 Read-Write on tw-* (subscribe with just the link; the topics are unguessable)
 or "login" removes that grant and gives each person their own account,
-(5) mint a token for the tailwatcher user.
+(5) mint a token for the tailwatcher user that never expires.
+
+NTFY's POST /v1/account/token gives a token that expires after 72 hours
+unless the request says otherwise ("expires": 0 = never). Before 0.24.1
+setup didn't, so its token stopped working 3 days later (HTTP 401);
+keep_token() makes such a token permanent while it still works.
 """
 
 import base64
@@ -19,6 +24,7 @@ import urllib.error
 import urllib.request
 
 USER = "tailwatcher"
+LABEL = "TailWatcher"  # the label setup() gives its token
 TOPICS = "tw-*"
 OLD_TOPICS = "tailwatcher*"  # watchers made before 0.12 (TailWatcher's user only, never anonymous)
 ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -102,13 +108,38 @@ def setup(base, admin_password, phones="open", admin_user="admin", call=_call):
         call(base, "DELETE", "/v1/users/access", admin, {"username": "*", "topic": TOPICS})
         steps.append(f"Phones need a login for {TOPICS} (each person gets one)")
 
-    status, data = call(base, "POST", "/v1/account/token", (USER, password), {"label": "TailWatcher"})
+    status, data = call(base, "POST", "/v1/account/token", (USER, password),
+                        {"label": LABEL, "expires": 0})  # 0 = never; NTFY's default is 72 hours
     _check(status, "make a token")
     token = data.get("token")
     if not token:
         raise SetupError("NTFY didn't return a token.")
     steps.append("Saved a token for TailWatcher (your admin password was not stored)")
     return token, steps
+
+
+def keep_token(base, token, call=_call):
+    """Make the token "Set up NTFY for me" made never expire, if it still
+    works. Only touches a token labelled TailWatcher that has an expiry, so a
+    token someone made by hand keeps the expiry they chose. Returns True if it
+    changed the token, False if nothing needed doing, None if NTFY couldn't
+    say (unreachable, or the token is already refused)."""
+    if not base or not token:
+        return False
+    try:
+        status, account = call(base, "GET", "/v1/account", token)
+    except SetupError:
+        return None
+    if status != 200 or not isinstance(account, dict):
+        return None
+    mine = next((t for t in account.get("tokens") or [] if t.get("token") == token), None)
+    if not mine or mine.get("label") != LABEL or not mine.get("expires") or mine.get("provisioned"):
+        return False
+    try:
+        status, _ = call(base, "PATCH", "/v1/account/token", token, {"token": token, "expires": 0})
+    except SetupError:
+        return None
+    return status == 200 or None
 
 
 def username_for(name, taken):

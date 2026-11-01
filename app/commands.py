@@ -379,7 +379,13 @@ def topic_pattern(topic):
     return topic
 
 
-def access_hint(topic):
+def access_hint(topic, code=403):
+    """What to do when NTFY refuses a topic. 401 = NTFY doesn't accept the
+    token at all (expired or deleted); 403 = the token works but lacks access."""
+    if code == 401:
+        return ("NTFY no longer accepts TailWatcher's token (it expired or was deleted; tokens from "
+                '"Set up NTFY for me" before 0.24.1 expired after 3 days): open ⚙ Settings and run '
+                '"Set up NTFY for me" again, or paste a token that never expires')
     return ('open ⚙ Settings and run "Set up NTFY for me" again, or in NTFY give the user '
             f"whose token TailWatcher uses Read-Write on {topic_pattern(topic)}")
 
@@ -419,7 +425,7 @@ class TopicListener(threading.Thread):
                 if e.code in (401, 403):
                     self.on_status(self.topic, (
                         f"text commands can't read topic {self.topic} (HTTP {e.code}); "
-                        + access_hint(self.topic)))
+                        + access_hint(self.topic, e.code)))
                     delay = 60
                 else:
                     log.warning("listening on %s: %s", self.topic, e)

@@ -216,6 +216,10 @@ class AccessHintTest(unittest.TestCase):
         self.assertIn("Read-Write on tailwatcher*", c.access_hint("tailwatcher_dad"))
         self.assertIn("Read-Write on family", c.access_hint("family"))
         self.assertIn("Set up NTFY for me", c.access_hint("tw-dad-x"))
+        # 401: the token itself is refused (expired), not a missing grant
+        self.assertIn("no longer accepts", c.access_hint("tw-dad-x", 401))
+        self.assertIn("Set up NTFY for me", c.access_hint("tw-dad-x", 401))
+        self.assertNotIn("no longer accepts", c.access_hint("tw-dad-x", 403))
 
 
 class ListenerFilterTest(unittest.TestCase):
