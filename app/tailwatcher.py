@@ -49,7 +49,7 @@ CONFIG_PATH = os.environ.get("TW_CONFIG", "/data/config.json")
 STATE_PATH = os.environ.get("TW_STATE", "/data/state.json")
 AIRPORTS_PATH = os.environ.get("TW_AIRPORTS", "/app/airports.csv")
 HEALTH_PORT = int(os.environ.get("TW_HEALTH_PORT", "8080"))
-VERSION = "0.24.0"
+VERSION = "0.24.1"
 # "startos" (main.ts sets it) or "docker" (the Dockerfile's default): only
 # changes setup hints and whether the dashboard password starts on.
 PLATFORM = os.environ.get("TW_PLATFORM", "startos")
@@ -395,6 +395,13 @@ def home_topics(cfg):
 
 
 PUBLIC_NTFY = "https://ntfy.sh"
+
+
+def keep_token(url, token):
+    """Turn a 3-day token from "Set up NTFY for me" before 0.24.1 into one
+    that never expires, while NTFY still accepts it."""
+    if ntfy_admin.keep_token(url, token):
+        log.info("NTFY token from Set up NTFY for me now never expires (it used to expire after 3 days)")
 
 
 def resolve_ntfy(cfg, env=os.environ):
@@ -894,7 +901,7 @@ def run():
         except urllib.error.HTTPError as e:
             if e.code != 429 and e.code < 500:
                 topic_errors[topic] = f"NTFY refused topic {topic} (HTTP {e.code})" + (
-                    "; " + commands.access_hint(topic) if e.code in (401, 403) else "")
+                    "; " + commands.access_hint(topic, e.code) if e.code in (401, 403) else "")
                 log.error(topic_errors[topic])
                 record("refused")
                 return True  # retrying won't help; don't queue
@@ -1681,6 +1688,9 @@ def run():
             # without restarting.
             cfg_mtime, cfg = mtime, load_config()
             ntfy_url, ntfy_token, phone_url = resolve_ntfy(cfg)
+            if ntfy_token and ntfy_url and ntfy_url != PUBLIC_NTFY:
+                threading.Thread(target=keep_token, args=(ntfy_url, ntfy_token),
+                                 daemon=True, name="keep-token").start()
             subs = subscriptions(cfg)
             for w in cfg["watchers"]:
                 log.info("watcher %s → topic %s: %s", w["name"], w["topic"],
@@ -1809,8 +1819,9 @@ def send_test(cfg):
                 "actions": [{"action": "view", "label": "ADS-B Exchange", "url": link}]})
             out.append((w["name"], w["topic"], "✓ sent"))
         except urllib.error.HTTPError as e:
-            hint = (": the token has no access to this topic; " + commands.access_hint(w["topic"])
-                    if e.code in (401, 403) else "")
+            hint = ("; " + commands.access_hint(w["topic"]) if e.code == 401 else
+                    ": the token has no access to this topic; " + commands.access_hint(w["topic"])
+                    if e.code == 403 else "")
             out.append((w["name"], w["topic"], f"✗ refused (HTTP {e.code}){hint}"))
         except (urllib.error.URLError, OSError) as e:
             out.append((w["name"], w["topic"], f"✗ could not reach {url}: {e}"))
